@@ -1,6 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugins>
 
+  <pyqgis_plugin name="Drænudløbsanalyse" version="0.1">
+    <description>Find drænudløbspunkter baseret på fald og DEM</description>
+    <about></about>
+    <version>0.1</version>
+    <qgis_minimum_version>3.0</qgis_minimum_version>
+    <homepage>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins</homepage>
+    <file_name>Drænudløbsanalyse.zip</file_name>
+    <icon>icon.png</icon>
+    <author_name>hrosenskjold</author_name>
+    <download_url>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins/Drænudløbsanalyse.zip</download_url>
+    <update_date>2026-04-24T09:14:37Z</update_date>
+    <experimental>False</experimental>
+    <deprecated>False</deprecated>
+    <tracker>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins/issues</tracker>
+    <repository>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins</repository>
+  </pyqgis_plugin>
   <pyqgis_plugin name="Jordprover" version="1.0.3">
     <description>Plugin til håndtering af jordprøver</description>
     <about>Plugin med værktøjer til grid, centerpunkter, QField-klargøring og rapporteksport.</about>
@@ -11,7 +27,7 @@
     <icon>icon.png</icon>
     <author_name>hrosenskjold</author_name>
     <download_url>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins/Jordprover.zip</download_url>
-    <update_date>2026-04-24T09:05:35Z</update_date>
+    <update_date>2026-04-24T09:14:37Z</update_date>
     <experimental>False</experimental>
     <deprecated>False</deprecated>
     <tracker>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins/issues</tracker>
@@ -27,7 +43,7 @@
     <icon>icon.png</icon>
     <author_name>hrosenskjold</author_name>
     <download_url>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins/Limf_tools.zip</download_url>
-    <update_date>2026-04-24T09:05:35Z</update_date>
+    <update_date>2026-04-24T09:14:37Z</update_date>
     <experimental>False</experimental>
     <deprecated>False</deprecated>
     <tracker>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins/issues</tracker>
