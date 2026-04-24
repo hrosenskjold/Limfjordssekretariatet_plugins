@@ -49,6 +49,12 @@ class LavCenterpunkterDialog(QtWidgets.QDialog, FORM_CLASS):
             if geom is None or geom.isNull() or geom.isEmpty():
                 continue
             center = geom.centroid()
+            # Strip Z/M så QField får rene 2D-punkter
+            if QgsWkbTypes.hasZ(center.wkbType()) or QgsWkbTypes.hasM(center.wkbType()):
+                g = center.get().clone()
+                g.dropZValue()
+                g.dropMValue()
+                center = QgsGeometry(g)
             new_feat = QgsFeature(point_layer.fields())
             new_feat.setGeometry(center)
             new_feat.setAttributes(feat.attributes())

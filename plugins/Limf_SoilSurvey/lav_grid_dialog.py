@@ -13,25 +13,34 @@ FORM_CLASS, _ = uic.loadUiType(os.path.join(os.path.dirname(__file__), 'lav_grid
 
 
 def _largest_polygon(geom):
-    """Returnér den største enkelt-polygon fra en (evt. multi-)geometri.
+    """Returnér den største enkelt 2D-polygon fra en (evt. Multi/Z-)geometri.
 
-    Intersection kan producere MultiPolygon når en gridcelle rammer flere
-    adskilte dele. QField kræver konsistente simple Polygon-geometrier, så vi
-    beholder kun den arealmæssigt største del.
+    Intersection mod en MultiPolygonZ-kilde kan producere MultiPolygonZ.
+    QField kræver simple, flad Polygon-geometri uden Z/M, så vi:
+      1) udtager kun den største del hvis multi
+      2) stripper Z/M-koordinater
     """
     if geom is None or geom.isNull() or geom.isEmpty():
         return None
-    wkb_type = geom.wkbType()
-    flat = QgsWkbTypes.flatType(wkb_type)
+    flat = QgsWkbTypes.flatType(geom.wkbType())
     if flat == QgsWkbTypes.Polygon:
-        return geom
-    if flat == QgsWkbTypes.MultiPolygon:
+        result = geom
+    elif flat == QgsWkbTypes.MultiPolygon:
         parts = geom.asGeometryCollection()
         poly_parts = [p for p in parts if not p.isNull() and not p.isEmpty() and p.area() > 0]
         if not poly_parts:
             return None
-        return max(poly_parts, key=lambda p: p.area())
-    return None
+        result = max(poly_parts, key=lambda p: p.area())
+    else:
+        return None
+
+    # Strip Z og M så QField får rene 2D-polygoner
+    if QgsWkbTypes.hasZ(result.wkbType()) or QgsWkbTypes.hasM(result.wkbType()):
+        g = result.get().clone()
+        g.dropZValue()
+        g.dropMValue()
+        result = QgsGeometry(g)
+    return result
 
 
 class LavGridDialog(QtWidgets.QDialog, FORM_CLASS):
