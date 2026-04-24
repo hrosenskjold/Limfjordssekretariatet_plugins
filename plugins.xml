@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugins>
+
+  <pyqgis_plugin name="Jordprover" version="1.0.3">
+    <description>Plugin til håndtering af jordprøver</description>
+    <about>Plugin med værktøjer til grid, centerpunkter, QField-klargøring og rapporteksport.</about>
+    <version>1.0.3</version>
+    <qgis_minimum_version>3.0</qgis_minimum_version>
+    <homepage>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins</homepage>
+    <file_name>Jordprover.zip</file_name>
+    <icon>icon.png</icon>
+    <author_name>hrosenskjold</author_name>
+    <download_url>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins/Jordprover.zip</download_url>
+    <update_date>2026-04-24T09:01:23Z</update_date>
+    <experimental>False</experimental>
+    <deprecated>False</deprecated>
+    <tracker>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins/issues</tracker>
+    <repository>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins</repository>
+  </pyqgis_plugin>
+</plugins>
