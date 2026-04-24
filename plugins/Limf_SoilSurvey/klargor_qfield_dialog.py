@@ -9,9 +9,74 @@ from qgis.core import (
     QgsRendererCategory,
     QgsFillSymbol,
     QgsMarkerSymbol,
+    QgsVectorLayer, QgsFeature, QgsGeometry,
+    QgsVectorFileWriter, QgsCoordinateTransformContext,
 )
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(os.path.dirname(__file__), 'klargor_qfield_dialog.ui'))
+
+
+def _to_single_polygon_2d(geom):
+    """Udtag den arealmæssigt største del og returnér simpel 2D-Polygon.
+
+    Håndterer MultiPolygon, Z- og M-koordinater som alle er ukompatible
+    med QField når lagets geometry type er Polygon.
+    """
+    if geom is None or geom.isNull() or geom.isEmpty():
+        return None
+    flat = QgsWkbTypes.flatType(geom.wkbType())
+    if flat == QgsWkbTypes.Polygon:
+        result = geom
+    elif flat == QgsWkbTypes.MultiPolygon:
+        parts = geom.asGeometryCollection()
+        poly_parts = [p for p in parts if not p.isNull() and not p.isEmpty() and p.area() > 0]
+        if not poly_parts:
+            return None
+        result = max(poly_parts, key=lambda p: p.area())
+    else:
+        return None
+    if QgsWkbTypes.hasZ(result.wkbType()) or QgsWkbTypes.hasM(result.wkbType()):
+        g = result.get().clone()
+        g.dropZValue()
+        g.dropMValue()
+        result = QgsGeometry(g)
+    return result
+
+
+def _konverter_til_simpel_polygon(src_layer, out_path):
+    """Gem src_layer som simpel 2D-Polygon GeoPackage på out_path.
+
+    Returnerer (out_path, None) ved succes, (None, fejlbesked) ved fejl.
+    """
+    crs = src_layer.crs()
+    mem = QgsVectorLayer(f'Polygon?crs={crs.authid()}', 'tmp', 'memory')
+    mem.dataProvider().addAttributes(src_layer.fields().toList())
+    mem.updateFields()
+
+    feats = []
+    for feat in src_layer.getFeatures():
+        g = _to_single_polygon_2d(feat.geometry())
+        if g is None:
+            continue
+        nf = QgsFeature(mem.fields())
+        nf.setGeometry(g)
+        nf.setAttributes(feat.attributes())
+        feats.append(nf)
+
+    if not feats:
+        return None, 'Ingen konverterbare features fundet i laget.'
+
+    mem.dataProvider().addFeatures(feats)
+
+    opts = QgsVectorFileWriter.SaveVectorOptions()
+    opts.driverName = 'GPKG'
+    opts.fileEncoding = 'UTF-8'
+    err, msg, _, _ = QgsVectorFileWriter.writeAsVectorFormatV3(
+        mem, out_path, QgsCoordinateTransformContext(), opts
+    )
+    if err != QgsVectorFileWriter.NoError:
+        return None, msg
+    return out_path, None
 
 STATUS_FIELD = 'status'
 VAL_IKKE = 'Ikke-udtaget'
@@ -148,6 +213,51 @@ class KlargorQFieldDialog(QtWidgets.QDialog, FORM_CLASS):
         layer = self._current_layer()
         if not layer:
             QMessageBox.warning(self, 'Fejl', 'Vælg et lag.')
+            return
+
+        # Geometritype-check: MultiPolygon og/eller Z-koordinater er ikke kompatible med QField
+        wkb = layer.wkbType()
+        if QgsWkbTypes.isMultiType(wkb) or QgsWkbTypes.hasZ(wkb) or QgsWkbTypes.hasM(wkb):
+            wkb_name = QgsWkbTypes.displayString(wkb)
+            reply = QMessageBox.question(
+                self, 'Geometrikonvertering nødvendig',
+                f'Laget "{layer.name()}" har geometritype {wkb_name}.\n\n'
+                f'QField kræver simpel 2D-Polygon. Vil du konvertere og erstatte laget i projektet?\n\n'
+                f'(En ny GeoPackage-fil oprettes med suffikset _2D, og laget swappes i projektet.)',
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+            src_uri = layer.dataProvider().dataSourceUri().split('|')[0]
+            base, ext = os.path.splitext(src_uri)
+            out_path = base + '_2D' + (ext if ext.lower() == '.gpkg' else '.gpkg')
+
+            out_path, err = _konverter_til_simpel_polygon(layer, out_path)
+            if err:
+                QMessageBox.warning(self, 'Konvertering fejlede', err)
+                return
+
+            layer_name = layer.name()
+            QgsProject.instance().removeMapLayer(layer.id())
+
+            new_layer = QgsVectorLayer(out_path, layer_name, 'ogr')
+            if not new_layer.isValid():
+                QMessageBox.warning(self, 'Fejl', f'Den konverterede fil er ugyldig:\n{out_path}')
+                return
+
+            QgsProject.instance().addMapLayer(new_layer)
+            self._populate_lag()
+            idx = self.cboLag.findData(new_layer.id())
+            if idx >= 0:
+                self.cboLag.setCurrentIndex(idx)
+            self._load_fields()
+
+            QMessageBox.information(
+                self, 'Konverteret',
+                f'Laget er nu simpel 2D-Polygon og lagt ind i projektet:\n{out_path}\n\n'
+                f'Klik "Kør" igen for at gennemføre QField-klargøringen.'
+            )
             return
 
         form_cfg = layer.editFormConfig()
