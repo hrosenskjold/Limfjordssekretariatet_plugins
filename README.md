@@ -10,6 +10,8 @@ Fælles plugin-repository med værktøjer udviklet af Limfjordssekretariatet til
 | **Limf_vådområdeanalyse** | 4.0.3 | Diverse GIS-værktøjer til Limfjordssekretariatet |
 | **Limf_drænudløbsanalyse** | 0.1 | Find drænudløbspunkter baseret på fald og DEM |
 
+> Mappenavne i koden er ASCII (`Limf_jordprover`, `Limf_vaadoMraadeanalyse`, `Limf_draenudloebsanalyse`) — visningsnavnene i QGIS kommer fra `metadata.txt`.
+
 ---
 
 ## Installation i QGIS
