@@ -1,0 +1,86 @@
+name: Package og Deploy QGIS Plugin
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pak plugin som zip
+        run: |
+          mkdir -p build/limf_tools
+          rsync -av --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            --exclude='*.pyc' --exclude='build' --exclude='.gitignore' \
+            --exclude='.claude' \
+            . build/limf_tools/
+          cd build
+          zip -r limf_tools.zip limf_tools/
+
+      - name: Generer plugins.xml
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PAGES_URL: https://hrosenskjold.github.io/limf-qgis-plugin
+        run: |
+          python3 - <<'PYEOF'
+          import os
+
+          def get_meta(key):
+              with open('metadata.txt', encoding='utf-8') as f:
+                  for line in f:
+                      if line.startswith(key + '='):
+                          return line.split('=', 1)[1].strip()
+              return ''
+
+          version      = get_meta('version')
+          name         = get_meta('name')
+          desc         = get_meta('description')
+          about        = get_meta('about')
+          qgis_min     = get_meta('qgisMinimumVersion')
+          author       = get_meta('author')
+          experimental = get_meta('experimental')
+          repo     = os.environ['GITHUB_REPOSITORY']
+          pages    = os.environ['PAGES_URL']
+
+          xml = (
+              "<?xml version = '1.0' encoding = 'UTF-8'?>\n"
+              "<plugins>\n"
+              f'  <pyqgis_plugin name="{name}" version="{version}">\n'
+              f'    <description>{desc}</description>\n'
+              f'    <about>{about}</about>\n'
+              f'    <version>{version}</version>\n'
+              f'    <qgis_minimum_version>{qgis_min}</qgis_minimum_version>\n'
+              f'    <homepage>https://github.com/{repo}</homepage>\n'
+              f'    <file_name>limf_tools.zip</file_name>\n'
+              f'    <icon>icon.png</icon>\n'
+              f'    <author_name>{author}</author_name>\n'
+              f'    <download_url>{pages}/limf_tools.zip</download_url>\n'
+              f'    <experimental>{experimental}</experimental>\n'
+              f'    <deprecated>False</deprecated>\n'
+              f'    <tracker>https://github.com/{repo}/issues</tracker>\n'
+              f'    <repository>https://github.com/{repo}</repository>\n'
+              f'    <tags>python</tags>\n'
+              f'    <server>False</server>\n'
+              f'  </pyqgis_plugin>\n'
+              "</plugins>\n"
+          )
+
+          os.makedirs('build', exist_ok=True)
+          with open('build/plugins.xml', 'w', encoding='utf-8') as f:
+              f.write(xml)
+          print(xml)
+          PYEOF
+
+      - name: Deploy til GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build
+          publish_branch: gh-pages
+          force_orphan: true

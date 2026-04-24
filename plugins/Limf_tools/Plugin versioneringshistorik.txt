@@ -1,0 +1,9 @@
+Plugin versioneringshistorik:
+1.5: left/right mulighed på VASP til terræn
+1.6: layout på popup
+1.7: Farver på afvandingsanalyse
+1.8: extent på afvandingsanalyse
+1.9: opfyld højdemodel virker nu
+1.10 brænd mike i højdemodel er tilføjet
+3.11 Jordberegning er tilføjet
+3.12: opdateret via Claude
