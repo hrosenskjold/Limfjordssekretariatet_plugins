@@ -6,9 +6,9 @@ Fælles plugin-repository med værktøjer udviklet af Limfjordssekretariatet til
 
 | Plugin | Version | Beskrivelse |
 |--------|---------|-------------|
-| **Jordprover** | 1.0.3 | Håndtering af jordprøver – grid, centerpunkter, QField-klargøring og rapporteksport |
-| **Limfjordssekretariatet tools** | 4.0.3 | Diverse GIS-værktøjer til Limfjordssekretariatet |
-| **Drænudløbsanalyse** | 0.1 | Find drænudløbspunkter baseret på fald og DEM |
+| **Limf_jordprøver** | 1.0.3 | Håndtering af jordprøver – grid, centerpunkter, QField-klargøring og rapporteksport |
+| **Limf_vådområdeanalyse** | 4.0.3 | Diverse GIS-værktøjer til Limfjordssekretariatet |
+| **Limf_drænudløbsanalyse** | 0.1 | Find drænudløbspunkter baseret på fald og DEM |
 
 ---
 

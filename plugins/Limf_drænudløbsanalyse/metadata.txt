@@ -1,5 +1,5 @@
 [general]
-name=Drænudløbsanalyse
+name=Limf_drænudløbsanalyse
 qgisMinimumVersion=3.0
 description=Find drænudløbspunkter baseret på fald og DEM
 version=0.1
