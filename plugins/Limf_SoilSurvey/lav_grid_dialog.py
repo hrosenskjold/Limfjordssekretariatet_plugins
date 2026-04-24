@@ -12,6 +12,28 @@ from qgis.core import (
 FORM_CLASS, _ = uic.loadUiType(os.path.join(os.path.dirname(__file__), 'lav_grid_dialog.ui'))
 
 
+def _largest_polygon(geom):
+    """Returnér den største enkelt-polygon fra en (evt. multi-)geometri.
+
+    Intersection kan producere MultiPolygon når en gridcelle rammer flere
+    adskilte dele. QField kræver konsistente simple Polygon-geometrier, så vi
+    beholder kun den arealmæssigt største del.
+    """
+    if geom is None or geom.isNull() or geom.isEmpty():
+        return None
+    wkb_type = geom.wkbType()
+    flat = QgsWkbTypes.flatType(wkb_type)
+    if flat == QgsWkbTypes.Polygon:
+        return geom
+    if flat == QgsWkbTypes.MultiPolygon:
+        parts = geom.asGeometryCollection()
+        poly_parts = [p for p in parts if not p.isNull() and not p.isEmpty() and p.area() > 0]
+        if not poly_parts:
+            return None
+        return max(poly_parts, key=lambda p: p.area())
+    return None
+
+
 class LavGridDialog(QtWidgets.QDialog, FORM_CLASS):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -92,6 +114,11 @@ class LavGridDialog(QtWidgets.QDialog, FORM_CLASS):
                 rect_geom = QgsGeometry.fromRect(QgsRectangle(x, y, x + bredde, y + laengde))
                 clipped = rect_geom.intersection(union_geom)
                 if not clipped.isNull() and not clipped.isEmpty() and clipped.area() > 0:
+                    clipped = _largest_polygon(clipped)
+                    if clipped is None:
+                        x += bredde
+                        col += 1
+                        continue
                     feat = QgsFeature()
                     feat.setGeometry(clipped)
                     feat.setAttributes([fid, col, row])

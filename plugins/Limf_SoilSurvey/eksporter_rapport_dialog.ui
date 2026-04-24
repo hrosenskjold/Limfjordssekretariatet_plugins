@@ -53,7 +53,7 @@
        <item>
         <widget class="QLineEdit" name="txtUddata">
          <property name="placeholderText">
-          <string>Vælg HTML-fil...</string>
+          <string>Vælg HTML-fil (CSV gemmes automatisk ved siden af)...</string>
          </property>
         </widget>
        </item>
