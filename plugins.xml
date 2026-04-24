@@ -11,7 +11,7 @@
     <icon>icon.png</icon>
     <author_name>hrosenskjold</author_name>
     <download_url>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins/Jordprover.zip</download_url>
-    <update_date>2026-04-24T09:03:15Z</update_date>
+    <update_date>2026-04-24T09:05:35Z</update_date>
     <experimental>False</experimental>
     <deprecated>False</deprecated>
     <tracker>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins/issues</tracker>
@@ -27,7 +27,7 @@
     <icon>icon.png</icon>
     <author_name>hrosenskjold</author_name>
     <download_url>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins/Limf_tools.zip</download_url>
-    <update_date>2026-04-24T09:03:15Z</update_date>
+    <update_date>2026-04-24T09:05:35Z</update_date>
     <experimental>False</experimental>
     <deprecated>False</deprecated>
     <tracker>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins/issues</tracker>
