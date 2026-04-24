@@ -11,7 +11,23 @@
     <icon>icon.png</icon>
     <author_name>hrosenskjold</author_name>
     <download_url>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins/Jordprover.zip</download_url>
-    <update_date>2026-04-24T09:01:23Z</update_date>
+    <update_date>2026-04-24T09:03:15Z</update_date>
+    <experimental>False</experimental>
+    <deprecated>False</deprecated>
+    <tracker>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins/issues</tracker>
+    <repository>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins</repository>
+  </pyqgis_plugin>
+  <pyqgis_plugin name="Limf_tools" version="4.0.3">
+    <description>Limfjordssekretariatet forskellige tools</description>
+    <about>Tools til Limfjordssekretariatet</about>
+    <version>4.0.3</version>
+    <qgis_minimum_version>3.0</qgis_minimum_version>
+    <homepage>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins</homepage>
+    <file_name>Limf_tools.zip</file_name>
+    <icon>icon.png</icon>
+    <author_name>hrosenskjold</author_name>
+    <download_url>https://hrosenskjold.github.io/Limfjordssekretariatet_plugins/Limf_tools.zip</download_url>
+    <update_date>2026-04-24T09:03:15Z</update_date>
     <experimental>False</experimental>
     <deprecated>False</deprecated>
     <tracker>https://github.com/hrosenskjold/Limfjordssekretariatet_plugins/issues</tracker>
