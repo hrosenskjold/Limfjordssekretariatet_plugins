@@ -22,7 +22,7 @@ Fælles plugin-repository med værktøjer udviklet af Limfjordssekretariatet til
 4. Klik **Add** under *Plugin Repositories*
 5. Udfyld felterne:
    - **Name:** `Limfjordssekretariatet`
-   - **URL:** `https://hrosenskjold.github.io/Limfjordssekretariatet_plugins/plugins.xml`
+   - **URL:** `(https://limfjordssekretariatet.github.io/Limfjordssekretariatet_plugins/plugins.xml)`
 6. Klik **OK**
 
 ### Trin 2 – Installér plugin
