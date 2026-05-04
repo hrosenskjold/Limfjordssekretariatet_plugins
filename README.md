@@ -6,7 +6,7 @@ Fælles plugin-repository med værktøjer udviklet af Limfjordssekretariatet til
 
 | Plugin | Version | Beskrivelse |
 |--------|---------|-------------|
-| **Limf_SoilSurvey** | 2.0.0 | Håndtering af jordprøver – grid, centerpunkter, QField-klargøring og rapporteksport |
+| **Limf_SoilSurvey** | 2.0.1 | Håndtering af jordprøver – grid, centerpunkter, QField-klargøring og rapporteksport |
 | **Limf_WetlandTools** | 4.0.3 | Diverse GIS-værktøjer til Limfjordssekretariatet |
 | **Limf_DrainOutletAnalysis** | 0.1 | Find drænudløbspunkter baseret på fald og DEM |
 
