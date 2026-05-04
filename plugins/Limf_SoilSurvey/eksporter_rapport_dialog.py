@@ -1,5 +1,4 @@
 import os
-import csv
 import base64
 import datetime
 from qgis.PyQt import uic, QtWidgets
@@ -183,62 +182,6 @@ def _build_html(layer):
 </html>'''
 
 
-CSV_HEADERS = [
-    'ID', 'Status', 'Koordinat (WGS84)',
-    'Vol. lgd. (cm)', 'Tørvetykkelse (cm)', 'Vandspejl (cm)',
-    'Lag 1 (cm)', 'Lag 1 jordtype',
-    'Lag 2 (cm)', 'Lag 2 jordtype',
-    'Lag 3 (cm)', 'Lag 3 jordtype',
-    'Lag 4 (cm)', 'Lag 4 jordtype',
-    'Kommentar',
-]
-
-
-def _build_csv_rows(layer):
-    src_crs = layer.crs()
-    transform = QgsCoordinateTransform(src_crs, WGS84_CRS, QgsCoordinateTransformContext())
-    need_transform = src_crs != WGS84_CRS
-    is_polygon = layer.geometryType() == QgsWkbTypes.PolygonGeometry
-
-    rows = []
-    for feat in layer.getFeatures():
-        geom = feat.geometry()
-        if geom is None or geom.isNull() or geom.isEmpty():
-            continue
-
-        pt = geom.centroid().asPoint() if is_polygon else geom.asPoint()
-        if need_transform:
-            pt = transform.transform(pt)
-        koordinat = f'{pt.y():.6f}N {pt.x():.6f}E'
-
-        feat_id = _val(feat, 'ID') or str(feat.id())
-        lag_data = []
-        for i in range(1, 5):
-            lag_data.append(_val(feat, f'lag {i}'))
-            lag_data.append(_val(feat, f'lag {i} type'))
-
-        rows.append([
-            feat_id,
-            _val(feat, 'status'),
-            koordinat,
-            _val(feat, 'Vol.lgd'),
-            _val(feat, 'Tørv. Ty.'),
-            _val(feat, 'VSP'),
-            *lag_data,
-            _val(feat, 'comment'),
-        ])
-    return rows
-
-
-def _write_csv(layer, csv_path):
-    rows = _build_csv_rows(layer)
-    with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
-        writer = csv.writer(f, delimiter=';')
-        writer.writerow(CSV_HEADERS)
-        writer.writerows(rows)
-    return len(rows)
-
-
 class EksporterRapportDialog(QtWidgets.QDialog, FORM_CLASS):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -265,12 +208,12 @@ class EksporterRapportDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def kor(self):
         layer_id = self.cboLag.currentData()
-        html_path = self.txtUddata.text().strip()
+        out_path = self.txtUddata.text().strip()
 
         if not layer_id:
             QMessageBox.warning(self, 'Fejl', 'Vælg et lag.')
             return
-        if not html_path:
+        if not out_path:
             QMessageBox.warning(self, 'Fejl', 'Vælg en placering til rapporten.')
             return
 
@@ -284,18 +227,8 @@ class EksporterRapportDialog(QtWidgets.QDialog, FORM_CLASS):
             QMessageBox.warning(self, 'Fejl', 'Ingen features med geometri fundet i laget.')
             return
 
-        if not html_path.lower().endswith('.html'):
-            html_path += '.html'
-        csv_path = html_path[:-5] + '.csv'
-
-        with open(html_path, 'w', encoding='utf-8') as f:
+        with open(out_path, 'w', encoding='utf-8') as f:
             f.write(html)
 
-        n_rows = _write_csv(layer, csv_path)
-
-        QMessageBox.information(
-            self, 'Rapport eksporteret',
-            f'HTML-rapport gemt:\n{html_path}\n\n'
-            f'CSV-tabel gemt ({n_rows} rækker):\n{csv_path}'
-        )
+        QMessageBox.information(self, 'Rapport eksporteret', f'Rapport gemt som:\n{out_path}')
         self.accept()
