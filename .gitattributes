@@ -1,0 +1,5 @@
+plugins/Limf_SoilSurvey/Data/Markkort/*.sbn filter=lfs diff=lfs merge=lfs -text
+plugins/Limf_SoilSurvey/Data/Markkort/*.sbx filter=lfs diff=lfs merge=lfs -text
+plugins/Limf_SoilSurvey/Data/Markkort/*.shx filter=lfs diff=lfs merge=lfs -text
+plugins/Limf_SoilSurvey/Data/Markkort/*.shp filter=lfs diff=lfs merge=lfs -text
+plugins/Limf_SoilSurvey/Data/Markkort/*.dbf filter=lfs diff=lfs merge=lfs -text
