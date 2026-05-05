@@ -12,6 +12,7 @@ from qgis.core import QgsProcessingMultiStepFeedback
 from qgis.core import QgsProcessingParameterVectorLayer
 from qgis.core import QgsProcessingParameterRasterLayer
 from qgis.core import QgsProcessingParameterRasterDestination
+from osgeo import gdal
 import processing
 
 
@@ -103,20 +104,14 @@ class InterpolerTerrn(QgsProcessingAlgorithm):
         if feedback.isCanceled():
             return {}
 
-        # Merge
-        alg_params = {
-            'DATA_TYPE': 5,  # Float32
-            'EXTRA': '',
-            'INPUT': [parameters['dhm'],outputs['ClipRasterByMaskLayer']['OUTPUT']],
-            'NODATA_INPUT': None,
-            'NODATA_OUTPUT': None,
-            'OPTIONS': None,
-            'PCT': False,
-            'SEPARATE': False,
-            'OUTPUT': parameters['Merge']
-        }
-        outputs['Merge'] = processing.run('gdal:merge', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-        results['Merge'] = outputs['Merge']['OUTPUT']
+        # Merge via Python GDAL (undgår gdal_merge.bat Windows-encodingfejl)
+        out_path = self.parameterAsOutputLayer(parameters, 'Merge', context)
+        dhm_path = self.parameterAsRasterLayer(parameters, 'dhm', context).source()
+        clipped_path = outputs['ClipRasterByMaskLayer']['OUTPUT']
+
+        gdal.Warp(out_path, [dhm_path, clipped_path], format='GTiff', outputType=gdal.GDT_Float32)
+
+        results['Merge'] = out_path
         return results
 
     def name(self):
