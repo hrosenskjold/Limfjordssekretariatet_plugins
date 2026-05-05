@@ -280,65 +280,69 @@ class LavGridDialog(QtWidgets.QDialog, FORM_CLASS):
         return result
 
     def _subdivide(self, geom, avg_ha, max_ha, min_ha, depth=0):
-        """Split polygon into strips aligned with the polygon's own long axis
-        (minimum bounding rectangle).  n is chosen to satisfy both the size
-        target (avg_ha) and the aspect-ratio limit (MAX_ASPECT_RATIO), but
-        is capped so individual strips do not fall below min_ha."""
+        """Split polygon into a 2D grid of roughly square cells aligned to the
+        polygon's minimum bounding rectangle.  n_cols × n_rows is chosen so
+        cells target avg_ha and are approximately square."""
         if depth > 10:
             return [geom]
 
         area_ha = geom.area() / 10000
         cx, cy, angle, length, width = self._get_mbr_params(geom)
 
-        # Use sqrt so fewer strips are cut per pass; SIZE recursion then cuts
-        # perpendicular, producing roughly-square cells without a 2-D grid.
-        n_size = max(2, round(math.sqrt(area_ha / avg_ha)))
-        # Strips needed so each strip's aspect ratio stays ≤ MAX_ASPECT_RATIO
-        n_ratio = math.ceil(length / (MAX_ASPECT_RATIO * width)) if width > 1 else 1
-        n = max(n_size, n_ratio)
-        # Cap n so pieces don't go below min_ha (exceptions allowed per user requirement)
+        # Total cells needed to reach the average target
+        n_total = max(2, round(area_ha / avg_ha))
+
+        # Distribute into n_cols (along length) × n_rows (along width) for square cells.
+        # Square cells require length/n_cols = width/n_rows → n_cols/n_rows = length/width.
+        aspect = length / max(width, 0.01)
+        n_cols = max(1, round(math.sqrt(n_total * aspect)))
+        n_rows = max(1, round(n_total / n_cols))
+        if n_cols * n_rows < 2:
+            n_cols = 2
+
+        # Cap so individual cells don't fall below min_ha
         if min_ha > 0:
-            n = min(n, max(2, int(area_ha / min_ha)))
+            max_n = max(2, int(area_ha / min_ha))
+            n_cols = min(n_cols, max_n)
+            n_rows = min(n_rows, max_n)
 
         cos_a, sin_a = math.cos(angle), math.sin(angle)
-        strip_len = length / n
-
-        bb = geom.boundingBox()
-        margin = math.hypot(bb.width(), bb.height())
+        col_w = length / n_cols
+        row_h = width / n_rows
+        eps = 1.0  # 1 m overlap so cell edges don't leave hairline gaps
 
         def make_pt(u, v):
             return QgsPointXY(cx + u * cos_a - v * sin_a,
                               cy + u * sin_a + v * cos_a)
 
         pieces = []
-        for i in range(n):
-            u0 = -length / 2 + i * strip_len
-            u1 = u0 + strip_len
-            strip = QgsGeometry.fromPolygonXY([[
-                make_pt(u0, -margin), make_pt(u1, -margin),
-                make_pt(u1,  margin), make_pt(u0,  margin),
-                make_pt(u0, -margin),
-            ]])
-            clipped = geom.intersection(strip)
-            if not clipped or clipped.isNull() or clipped.isEmpty():
-                continue
-            for part in self._single_parts(clipped):
-                if part.area() > 1:
-                    pieces.append(part)
+        for col in range(n_cols):
+            u0 = -length / 2 + col * col_w - eps
+            u1 = -length / 2 + (col + 1) * col_w + eps
+            for row in range(n_rows):
+                v0 = -width / 2 + row * row_h - eps
+                v1 = -width / 2 + (row + 1) * row_h + eps
+                cell = QgsGeometry.fromPolygonXY([[
+                    make_pt(u0, v0), make_pt(u1, v0),
+                    make_pt(u1, v1), make_pt(u0, v1),
+                    make_pt(u0, v0),
+                ]])
+                clipped = geom.intersection(cell)
+                if not clipped or clipped.isNull() or clipped.isEmpty():
+                    continue
+                for part in self._single_parts(clipped):
+                    if part.area() > 1:
+                        pieces.append(part)
 
+        if not pieces:
+            return [geom]
+
+        # Always recurse on pieces still exceeding max_ha (no convexity guard —
+        # that was suppressing the max limit for concave parcels)
         result = []
         for piece in pieces:
             if piece.area() / 10000 > max_ha:
-                # Only recurse if piece is roughly convex — cutting a concave piece
-                # through its complex boundary creates GEOS sliver artefacts.
-                hull = piece.convexHull()
-                convex_ratio = (piece.area() / hull.area()
-                                if hull and not hull.isNull() and hull.area() > 0
-                                else 1.0)
-                if convex_ratio >= 0.85:
-                    result.extend(self._subdivide(piece, avg_ha, max_ha, min_ha, depth + 1))
-                else:
-                    result.append(piece)
+                result.extend(self._subdivide(piece, avg_ha, max_ha, min_ha, depth + 1))
             else:
                 result.append(piece)
         return result if result else [geom]
