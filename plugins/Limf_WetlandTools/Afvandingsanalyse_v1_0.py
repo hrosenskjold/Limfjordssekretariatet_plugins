@@ -3,6 +3,8 @@ from qgis.core import QgsProcessingAlgorithm
 from qgis.core import QgsProcessingMultiStepFeedback
 from qgis.core import QgsProcessingParameterRasterLayer, QgsProcessingParameterVectorLayer, QgsProcessingParameterField, QgsProcessingParameterFeatureSink, QgsProcessingParameterExtent
 from qgis.core import QgsRendererCategory, QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsProject
+from qgis.core import QgsProcessingUtils
+from osgeo import gdal, ogr, osr
 import processing
 
 class Afvandingsmodelqgisoktober2025gdal(QgsProcessingAlgorithm):
@@ -68,13 +70,25 @@ class Afvandingsmodelqgisoktober2025gdal(QgsProcessingAlgorithm):
         if feedback.isCanceled():
             return {}
 
-        alg_params = {
-            'BAND': 1,
-            'FIELD': 'Gridkode',
-            'INPUT': outputs['ReclassifyByTable']['OUTPUT'],
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
-        }
-        outputs['PolygonisrRasterTilVektor'] = processing.run('gdal:polygonize', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        # Polygonize via Python GDAL bindings (undgår Windows-encodingfejl i gdal_polygonize.bat)
+        raster_path = outputs['ReclassifyByTable']['OUTPUT']
+        temp_gpkg = QgsProcessingUtils.generateTempFilename('polygonize_output.gpkg')
+
+        src_ds = gdal.Open(raster_path)
+        src_band = src_ds.GetRasterBand(1)
+        srs = osr.SpatialReference()
+        srs.ImportFromWkt(src_ds.GetProjection())
+
+        drv = ogr.GetDriverByName('GPKG')
+        dst_ds = drv.CreateDataSource(temp_gpkg)
+        dst_layer = dst_ds.CreateLayer('OUTPUT', srs=srs, geom_type=ogr.wkbPolygon)
+        dst_layer.CreateField(ogr.FieldDefn('Gridkode', ogr.OFTInteger))
+        gdal.Polygonize(src_band, None, dst_layer, 0, [], callback=None)
+        dst_layer = None
+        dst_ds = None
+        src_ds = None
+
+        outputs['PolygonisrRasterTilVektor'] = {'OUTPUT': f'{temp_gpkg}|layername=OUTPUT'}
 
         feedback.setCurrentStep(4)
         if feedback.isCanceled():
