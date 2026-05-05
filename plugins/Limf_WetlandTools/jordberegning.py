@@ -1,14 +1,12 @@
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (
-    QgsProcessing,
     QgsProcessingAlgorithm,
     QgsProcessingParameterRasterLayer,
     QgsProcessingParameterRasterDestination,
     QgsProcessingException,
-    QgsRasterLayer,
 )
-import processing
-import math
+from osgeo import gdal
+import numpy as np
 
 
 class DHMVolumen(QgsProcessingAlgorithm):
@@ -69,57 +67,63 @@ class DHMVolumen(QgsProcessingAlgorithm):
 
         feedback.pushInfo("Beregner differenceraster...")
 
-        result = processing.run(
-            "gdal:rastercalculator",
-            {
-                "INPUT_A": orig.source(),
-                "BAND_A": 1,
-                "INPUT_B": new.source(),
-                "BAND_B": 1,
-                "FORMULA": "A-B",
-                "RTYPE": 5,
-                "OUTPUT": out_path,
-            },
-            context=context,
-            feedback=feedback,
-            is_child_algorithm=True
-        )
+        src_a = gdal.Open(orig.source())
+        src_b = gdal.Open(new.source())
 
-        diff_layer = QgsRasterLayer(result["OUTPUT"], "diff")
-        provider = diff_layer.dataProvider()
+        gt_a = src_a.GetGeoTransform()
+        proj_a = src_a.GetProjection()
+        xsize_a = src_a.RasterXSize
+        ysize_a = src_a.RasterYSize
 
-        cell_area = abs(
-            diff_layer.rasterUnitsPerPixelX() *
-            diff_layer.rasterUnitsPerPixelY()
-        )
+        # Tilpas B til A's grid i hukommelsen (håndterer forskellige extents/opløsninger)
+        nodata_b_src = src_b.GetRasterBand(1).GetNoDataValue()
+        fill_nodata = nodata_b_src if nodata_b_src is not None else -9999.0
 
-        block = provider.block(
-            1,
-            diff_layer.extent(),
-            diff_layer.width(),
-            diff_layer.height()
-        )
+        mem_driver = gdal.GetDriverByName('MEM')
+        b_aligned = mem_driver.Create('', xsize_a, ysize_a, 1, gdal.GDT_Float32)
+        b_aligned.SetGeoTransform(gt_a)
+        b_aligned.SetProjection(proj_a)
+        b_aligned.GetRasterBand(1).Fill(fill_nodata)
+        b_aligned.GetRasterBand(1).SetNoDataValue(fill_nodata)
+        gdal.ReprojectImage(src_b, b_aligned, None, None, gdal.GRA_Bilinear)
 
-        sum_pos = 0.0
-        sum_neg = 0.0
+        band_a = src_a.GetRasterBand(1)
+        nodata_a = band_a.GetNoDataValue()
+        data_a = band_a.ReadAsArray().astype(np.float32)
+        data_b = b_aligned.GetRasterBand(1).ReadAsArray().astype(np.float32)
 
-        for i in range(diff_layer.width() * diff_layer.height()):
-            val = block.value(i)
-            if val is None or math.isnan(val):
-                continue
-            if val > 0:
-                sum_pos += val
-            elif val < 0:
-                sum_neg += val
+        diff = data_a - data_b
 
-        vol_cut = sum_pos * cell_area
-        vol_fill = -sum_neg * cell_area
+        nodata_out = -9999.0
+        mask = np.zeros(diff.shape, dtype=bool)
+        if nodata_a is not None:
+            mask |= np.isclose(data_a, nodata_a)
+        mask |= np.isclose(data_b, fill_nodata)
+        diff[mask] = nodata_out
+
+        gtiff_driver = gdal.GetDriverByName('GTiff')
+        out_ds = gtiff_driver.Create(out_path, xsize_a, ysize_a, 1, gdal.GDT_Float32)
+        out_ds.SetGeoTransform(gt_a)
+        out_ds.SetProjection(proj_a)
+        out_band = out_ds.GetRasterBand(1)
+        out_band.SetNoDataValue(nodata_out)
+        out_band.WriteArray(diff)
+        out_ds.FlushCache()
+        out_ds = None
+        src_a = None
+        b_aligned = None
+        src_b = None
+
+        cell_area = abs(gt_a[1] * gt_a[5])
+        valid = diff[~mask]
+        vol_cut = float(valid[valid > 0].sum()) * cell_area
+        vol_fill = float(-valid[valid < 0].sum()) * cell_area
 
         feedback.pushInfo(f"Jordafgravning: {vol_cut:.2f} m³")
         feedback.pushInfo(f"Jordtilførsel: {vol_fill:.2f} m³")
 
         return {
-            self.PARAM_OUTPUT: result["OUTPUT"],
+            self.PARAM_OUTPUT: out_path,
             "JORD_AFGRAVNING_M3": vol_cut,
             "JORD_TILFOERSEL_M3": vol_fill,
         }
