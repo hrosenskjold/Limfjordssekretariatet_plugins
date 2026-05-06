@@ -31,6 +31,7 @@ JORDTYPE_VALG = [
     'Ler',
     'Kalkgytje',
     'Fuldstændig omsat tørv',
+    'Svagt omsat tørv',
 ]
 
 # (feltnavn, type, alias, widget-type, widget-config)
