@@ -8,6 +8,7 @@ from qgis.PyQt.QtCore import QVariant
 from qgis.core import (
     QgsProject, QgsPointXY, QgsRasterLayer, QgsCoordinateTransform,
     QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsWkbTypes,
+    QgsCategorizedSymbolRenderer, QgsRendererCategory, QgsLineSymbol,
 )
 from qgis.gui import QgsMapToolEmitPoint, QgsVertexMarker
 
@@ -200,15 +201,41 @@ class DrainDialog(QDialog):
         self._place_marker("result", result_pt, QColor("red"),
                            QgsVertexMarker.ICON_BOX)
 
-        # Gem linje i memory-lag
-        self._add_drain_line(self.start_point, result_pt, start_h, r_drain)
+        # Find knækpunkt hvor dybde krydser 50 cm
+        DEPTH_THRESHOLD = 0.50
+        n_samples = max(20, int(r_dist / max(px_w, px_h)) + 1)
+        ts = np.linspace(0, 1, n_samples)
+        sample_x = sx + ts * (rx_dem - sx)
+        sample_y = sy + ts * (ry_dem - sy)
+        col_idx = np.clip(((sample_x - x_min) / px_w - 0.5).astype(int), 0, cols - 1)
+        row_idx = np.clip(((y_max - sample_y) / px_h - 0.5).astype(int), 0, rows - 1)
+        dem_along   = dem_arr[row_idx, col_idx]
+        drain_along = start_h - slope * (ts * r_dist)
+        depth_along = dem_along - drain_along   # positiv = dræn under terræn
+
+        start_status = "Lukket" if depth_along[0] >= DEPTH_THRESHOLD else "Åben"
+        break_pt = break_kote = None
+        for i in range(len(depth_along) - 1):
+            d0, d1 = depth_along[i], depth_along[i + 1]
+            if not (np.isnan(d0) or np.isnan(d1)) and (d0 >= DEPTH_THRESHOLD) != (d1 >= DEPTH_THRESHOLD):
+                frac   = (DEPTH_THRESHOLD - d0) / (d1 - d0)
+                t_b    = ts[i] + frac * (ts[i + 1] - ts[i])
+                bx_dem = sx + t_b * (rx_dem - sx)
+                by_dem = sy + t_b * (ry_dem - sy)
+                bx_map, by_map = self._from_dem_crs(QgsPointXY(bx_dem, by_dem), dem)
+                break_pt  = QgsPointXY(bx_map, by_map)
+                break_kote = start_h - slope * (t_b * r_dist)
+                break
+
+        # Gem linje(r) i memory-lag
+        self._add_drain_line(self.start_point, result_pt, start_h, r_drain,
+                             start_status, break_pt, break_kote)
 
         self.canvas.setCenter(result_pt)
         self.canvas.refresh()
 
         self.lbl_result.setText(
             f"<b>Udløbspunkt{note}:</b><br>"
-            f"Koordinater: ({rx_map:.2f}, {ry_map:.2f})<br>"
             f"Afstand fra start: <b>{r_dist:.1f} m</b><br>"
             f"Terrænkote (DEM): {r_dem:.3f} m<br>"
             f"Drænbundskote ved udløb: {r_drain:.3f} m<br>"
@@ -217,10 +244,10 @@ class DrainDialog(QDialog):
 
     # --------------------------------------------------- Line memory layer --
 
-    def _add_drain_line(self, start_pt, end_pt, start_kote, slut_kote):
+    def _add_drain_line(self, start_pt, end_pt, start_kote, slut_kote,
+                        start_status, break_pt=None, break_kote=None):
         crs_str = self.canvas.mapSettings().destinationCrs().authid()
 
-        # Genbrug eksisterende lag med samme navn, ellers opret nyt
         layer = next(
             (lyr for lyr in QgsProject.instance().mapLayers().values()
              if lyr.name() == "Drænlinjer"
@@ -232,17 +259,41 @@ class DrainDialog(QDialog):
             layer.dataProvider().addAttributes([
                 QgsField('start_kote', QVariant.Double),
                 QgsField('slut_kote',  QVariant.Double),
+                QgsField('status',     QVariant.String),
             ])
             layer.updateFields()
+            self._apply_drain_renderer(layer)
             QgsProject.instance().addMapLayer(layer)
 
-        feat = QgsFeature(layer.fields())
-        feat.setGeometry(QgsGeometry.fromPolylineXY([start_pt, end_pt]))
-        feat.setAttribute('start_kote', round(start_kote, 3))
-        feat.setAttribute('slut_kote',  round(slut_kote,  3))
-        layer.dataProvider().addFeatures([feat])
+        def make_feat(p1, p2, k1, k2, status):
+            f = QgsFeature(layer.fields())
+            f.setGeometry(QgsGeometry.fromPolylineXY([p1, p2]))
+            f.setAttribute('start_kote', round(k1, 3))
+            f.setAttribute('slut_kote',  round(k2, 3))
+            f.setAttribute('status',     status)
+            return f
+
+        end_status = "Åben" if start_status == "Lukket" else "Lukket"
+        if break_pt is None:
+            feats = [make_feat(start_pt, end_pt, start_kote, slut_kote, start_status)]
+        else:
+            feats = [
+                make_feat(start_pt, break_pt, start_kote, break_kote, start_status),
+                make_feat(break_pt, end_pt,   break_kote, slut_kote,  end_status),
+            ]
+
+        layer.dataProvider().addFeatures(feats)
         layer.updateExtents()
         layer.triggerRepaint()
+
+    def _apply_drain_renderer(self, layer):
+        sym_aaben  = QgsLineSymbol.createSimple({'color': '#27AE60', 'line_width': '0.8'})
+        sym_lukket = QgsLineSymbol.createSimple({'color': '#E74C3C', 'line_width': '0.8'})
+        categories = [
+            QgsRendererCategory('Åben',   sym_aaben,  'Åben'),
+            QgsRendererCategory('Lukket', sym_lukket, 'Lukket'),
+        ]
+        layer.setRenderer(QgsCategorizedSymbolRenderer('status', categories))
 
     # ------------------------------------------------------------ Helpers --
 
