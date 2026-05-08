@@ -264,6 +264,12 @@ class DrainDialog(QDialog):
             layer.updateFields()
             self._apply_drain_renderer(layer)
             QgsProject.instance().addMapLayer(layer)
+        else:
+            # Tilføj 'status'-felt til ældre lag der mangler det
+            if layer.fields().indexOf('status') < 0:
+                layer.dataProvider().addAttributes([QgsField('status', QVariant.String)])
+                layer.updateFields()
+                self._apply_drain_renderer(layer)
 
         def make_feat(p1, p2, k1, k2, status):
             f = QgsFeature(layer.fields())
