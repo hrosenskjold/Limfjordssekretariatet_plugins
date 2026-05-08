@@ -64,6 +64,13 @@ class DrainDialog(QDialog):
         self.radius_spin.setDecimals(0)
         self.radius_spin.setSuffix(" m")
         frm2.addRow("Max søgeradius:", self.radius_spin)
+
+        self.offset_spin = QDoubleSpinBox()
+        self.offset_spin.setRange(-500, 500)
+        self.offset_spin.setValue(10.0)
+        self.offset_spin.setDecimals(1)
+        self.offset_spin.setSuffix(" cm")
+        frm2.addRow("Offset over/under terræn:", self.offset_spin)
         main.addWidget(grp_par)
 
         # Knapper
@@ -129,6 +136,7 @@ class DrainDialog(QDialog):
         start_h = self.height_spin.value()
         slope      = self.slope_spin.value() / 1000.0   # ‰ → m/m
         max_radius = self.radius_spin.value()
+        offset_m   = self.offset_spin.value() / 100.0   # cm → m
 
         # Startpunkt i DEM's koordinatsystem
         pt_dem = self._to_dem_crs(self.start_point, dem)
@@ -153,27 +161,28 @@ class DrainDialog(QDialog):
         # Drænbundskote ved hvert pixel = starthøjde minus fald gange afstand
         drain_elev = start_h - slope * dist
 
-        # Vi søger: drain_elev = DEM + 0.10  →  diff = 0
-        diff = drain_elev - (dem_arr + 0.10)
+        # Vi søger: drain_elev = DEM + offset_m  →  diff = 0
+        diff = drain_elev - (dem_arr + offset_m)
 
         min_d = max(px_w, px_h)           # ekskluder startpixel
         valid = (~np.isnan(dem_arr)) & (dist > min_d)
 
+        offset_cm_str = f"{self.offset_spin.value():.1f} cm"
         note = ""
-        # Find nærmeste pixel hvor drænet er >= 10 cm over terræn
+        # Find nærmeste pixel hvor drænet rammer det ønskede offset
         above = valid & (diff >= 0)
         if np.any(above):
             idx = np.unravel_index(
                 np.argmin(np.where(above, dist, np.inf)), dist.shape)
         else:
-            # Fallback: pixel med mindst |diff| (drænet når ikke 10 cm over DEM)
+            # Fallback: pixel med mindst |diff|
             if not np.any(valid):
                 QMessageBox.warning(self, "Ingen resultat",
                                     "Ingen gyldige DEM-celler fundet.")
                 return
             idx = np.unravel_index(
                 np.argmin(np.where(valid, np.abs(diff), np.inf)), diff.shape)
-            note = " (approx. – drænet når ikke 10 cm over terræn inden for DEM)"
+            note = f" (approx. – drænet når ikke {offset_cm_str} over terræn inden for DEM)"
 
         r_dist  = float(dist[idx])
         r_dem   = float(dem_arr[idx])
