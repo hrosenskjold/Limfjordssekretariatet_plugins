@@ -63,13 +63,16 @@ class DrainDialog(QDialog):
         grp_batch = QGroupBox("Punktlag")
         frm_batch = QFormLayout(grp_batch)
         self.point_layer_combo = QComboBox()
+        self.point_layer_combo.currentIndexChanged.connect(self._on_point_layer_changed)
         frm_batch.addRow("Punktlag:", self.point_layer_combo)
+        self.start_kote_field_combo = QComboBox()
+        frm_batch.addRow("Startkote-felt:", self.start_kote_field_combo)
         btn_refresh = QPushButton("Opdater lagliste")
         btn_refresh.clicked.connect(self._populate_point_layers)
         frm_batch.addRow(btn_refresh)
         lbl_info = QLabel(
-            "DHM-værdien samples automatisk for hvert punkt.\n"
-            "Starthøjde sættes til DHM − 1 m per punkt."
+            "Vælg et talfeltet med drænbundskoten, eller lad stå tomt\n"
+            "for automatisk DHM − 1 m per punkt."
         )
         lbl_info.setWordWrap(True)
         frm_batch.addRow(lbl_info)
@@ -131,13 +134,28 @@ class DrainDialog(QDialog):
                 self.dem_combo.addItem(layer.name(), layer.id())
 
     def _populate_point_layers(self):
+        self.point_layer_combo.blockSignals(True)
         self.point_layer_combo.clear()
         for layer in QgsProject.instance().mapLayers().values():
             if (isinstance(layer, QgsVectorLayer)
                     and layer.geometryType() == QgsWkbTypes.PointGeometry
                     and layer.isValid()):
                 self.point_layer_combo.addItem(layer.name(), layer.id())
+        self.point_layer_combo.blockSignals(False)
+        self._on_point_layer_changed()
         self._on_tab_changed(self.tabs.currentIndex())
+
+    def _on_point_layer_changed(self):
+        self.start_kote_field_combo.clear()
+        self.start_kote_field_combo.addItem("— DHM − 1 m (automatisk) —", None)
+        lid = self.point_layer_combo.currentData()
+        layer = QgsProject.instance().mapLayer(lid) if lid else None
+        if layer is None:
+            return
+        numeric = (QVariant.Int, QVariant.LongLong, QVariant.Double)
+        for field in layer.fields():
+            if field.type() in numeric:
+                self.start_kote_field_combo.addItem(field.name(), field.name())
 
     def _on_tab_changed(self, index):
         if index == 0:
@@ -231,6 +249,8 @@ class DrainDialog(QDialog):
         max_radius = self.radius_spin.value()
         offset_m   = self.offset_spin.value() / 100.0
 
+        kote_field = self.start_kote_field_combo.currentData()  # None = auto
+
         map_crs   = self.canvas.mapSettings().destinationCrs()
         layer_crs = pt_layer.crs()
         tr = (QgsCoordinateTransform(layer_crs, map_crs, QgsProject.instance())
@@ -254,13 +274,26 @@ class DrainDialog(QDialog):
             if tr is not None:
                 pt = tr.transform(pt)
 
-            # Sample DHM for automatic start_h
+            # Sample DHM (bruges altid til DHM-værdien; bruges som fallback til start_h)
             pt_dem = self._to_dem_crs(pt, dem)
             val, ok = dem.dataProvider().sample(pt_dem, 1)
-            if not ok or val != val:  # invalid or NaN
-                n_err += 1
-                continue
-            start_h = val - 1.0
+            dhm_ok = ok and val == val  # not NaN
+
+            # Bestem start_h: fra felt eller DHM − 1 m
+            if kote_field is not None:
+                field_val = feat[kote_field]
+                if field_val is None or field_val != field_val:  # NULL / NaN
+                    if not dhm_ok:
+                        n_err += 1
+                        continue
+                    start_h = val - 1.0
+                else:
+                    start_h = float(field_val)
+            else:
+                if not dhm_ok:
+                    n_err += 1
+                    continue
+                start_h = val - 1.0
 
             res = self._analyse_point(pt, start_h, dem,
                                       slope, max_radius, offset_m, show_errors=False)
