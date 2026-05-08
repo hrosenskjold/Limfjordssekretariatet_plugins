@@ -34,10 +34,11 @@ class DrainDialog(QDialog):
         self.btn_pick = QPushButton("Klik startpunkt på kortet…")
         self.btn_pick.clicked.connect(self._pick_point)
         frm.addRow(self.btn_pick)
-        self.x_edit = QLineEdit(); self.x_edit.setReadOnly(True)
-        self.y_edit = QLineEdit(); self.y_edit.setReadOnly(True)
-        frm.addRow("X:", self.x_edit)
-        frm.addRow("Y:", self.y_edit)
+        self.dhm_edit = QLineEdit()
+        self.dhm_edit.setReadOnly(True)
+        self.dhm_edit.setStyleSheet("background-color: #d0d0d0; color: #444;")
+        self.dhm_edit.setPlaceholderText("— klik på kort —")
+        frm.addRow("DHM værdi:", self.dhm_edit)
         self.height_spin = QDoubleSpinBox()
         self.height_spin.setRange(-9999, 9999)
         self.height_spin.setDecimals(3)
@@ -105,16 +106,15 @@ class DrainDialog(QDialog):
 
     def _on_canvas_click(self, point, button):
         self.start_point = point
-        self.x_edit.setText(f"{point.x():.3f}")
-        self.y_edit.setText(f"{point.y():.3f}")
 
-        # Auto-sample højde fra DEM
+        # Sample DHM-værdi og sæt felter
         dem = self._get_dem_layer()
         if dem:
             pt_dem = self._to_dem_crs(point, dem)
             val, ok = dem.dataProvider().sample(pt_dem, 1)
             if ok and val == val:   # not NaN
-                self.height_spin.setValue(val)
+                self.dhm_edit.setText(f"{val:.3f} m.o.h.")
+                self.height_spin.setValue(val - 1.0)
 
         # Blå kryds ved startpunkt
         self._place_marker("start", point, QColor("blue"),
