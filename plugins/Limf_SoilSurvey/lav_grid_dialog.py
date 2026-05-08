@@ -12,7 +12,7 @@ from qgis.core import (
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(os.path.dirname(__file__), 'lav_grid_dialog.ui'))
 
-MARKKORT_PATH = os.path.join(os.path.dirname(__file__), 'Data', 'Markkort', 'Markkort2024_simpl.shp')
+MARKKORT_PATH = os.path.join(os.path.dirname(__file__), 'Data', 'Markkort', 'Markkort_V3_snap.shp')
 MAX_ASPECT_RATIO = 3.0   # default max length/width ratio before subdivision kicks in
 
 
