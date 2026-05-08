@@ -3,6 +3,8 @@ import base64
 import datetime
 from qgis.PyQt import uic, QtWidgets
 from qgis.PyQt.QtWidgets import QMessageBox, QFileDialog
+from qgis.PyQt.QtGui import QImage
+from qgis.PyQt.QtCore import QByteArray, QBuffer, Qt
 
 from qgis.core import (
     QgsProject, QgsWkbTypes,
@@ -49,11 +51,18 @@ def _img_tag(path):
     if not resolved:
         return '<span style="color:#bbb;font-style:italic;">Intet foto</span>'
     try:
-        with open(resolved, 'rb') as f:
-            data = base64.b64encode(f.read()).decode()
-        ext = os.path.splitext(resolved)[1].lower().lstrip('.')
-        mime = 'jpeg' if ext in ('jpg', 'jpeg') else ext
-        return f'<img src="data:image/{mime};base64,{data}" style="max-width:100%;max-height:180px;">'
+        img = QImage(resolved)
+        if img.isNull():
+            return '<span style="color:#bbb;font-style:italic;">Foto fejlede</span>'
+        # Skaler ned til maks 800 px på den lange side
+        if img.width() > 800 or img.height() > 800:
+            img = img.scaled(800, 800, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QBuffer.WriteOnly)
+        img.save(buf, 'JPEG', 70)   # kvalitet 70 → markant mindre filstørrelse
+        data = base64.b64encode(ba.data()).decode()
+        return f'<img src="data:image/jpeg;base64,{data}" style="max-width:100%;max-height:180px;">'
     except Exception:
         return '<span style="color:#bbb;font-style:italic;">Foto fejlede</span>'
 
@@ -76,21 +85,19 @@ def _build_html(layer):
         koordinat = f'{pt.y():.6f}° N, {pt.x():.6f}° Ø (WGS84)'
 
         feat_id = _val(feat, 'ID') or str(feat.id())
-        status = _val(feat, 'status')
-        status_color = '#27AE60' if status == 'Udtaget' else '#C0392B'
 
         # Lagbeskrivelser
         lag_rows = ''
-        for i in range(1, 5):
+        for i in range(1, 6):
             dybde = _val(feat, f'lag {i}')
             jordtype = _val(feat, f'lag {i} type')
             if dybde or jordtype:
-                lag_rows += f'''
-                <tr>
-                  <td style="white-space:nowrap;padding-right:14px;vertical-align:top;
-                             color:#555;font-size:9pt;">{dybde + ' cm' if dybde else ''}</td>
-                  <td style="vertical-align:top;font-size:9pt;">{jordtype}</td>
-                </tr>'''
+                lag_rows += (
+                    '<tr>'
+                    f'<td style="white-space:nowrap;padding:1px 12px 1px 0;vertical-align:top;color:#555;font-size:9pt;">{dybde + " cm" if dybde else ""}</td>'
+                    f'<td style="padding:1px 0;vertical-align:top;font-size:9pt;">{jordtype}</td>'
+                    '</tr>'
+                )
 
         comment = _val(feat, 'comment')
         if comment:
@@ -105,8 +112,7 @@ def _build_html(layer):
 
         # Ekstrafelter
         ekstra = ''
-        for felt, alias in [('Vol.lgd', 'Vol. lgd.'), ('Tørv. Ty.', 'Tørvetykkelse'),
-                             ('Perm.', 'Permeabilitet'), ('VSP', 'Vandspejl')]:
+        for felt, alias in [('Vol.lgd', 'Vol. lgd.'), ('Perm.', 'Permeabilitet'), ('VSP', 'Vandspejl')]:
             v = _val(feat, felt)
             if v:
                 ekstra += f'<div style="font-size:8pt;margin-top:2px;"><b>{alias}:</b> {v}</div>'
@@ -116,9 +122,8 @@ def _build_html(layer):
         feature_rows.append(f'''
         <tr>
           <td style="width:20%;vertical-align:top;padding:8px;border:1px solid #ccc;background:#f7f7f7;">
-            <div style="font-size:11pt;font-weight:bold;margin-bottom:3px;">Område {feat_id}</div>
+            <div style="font-size:11pt;font-weight:bold;margin-bottom:3px;">Feltnr. {feat_id}</div>
             <div style="font-size:8pt;color:#666;margin-bottom:6px;">{koordinat}</div>
-            <div style="font-size:8.5pt;font-weight:bold;color:{status_color};">{status or 'Ukendt'}</div>
             {ekstra}
           </td>
           <td style="width:42%;vertical-align:top;padding:8px;border:1px solid #ccc;">
