@@ -48,7 +48,7 @@ class LavCenterpunkterDialog(QtWidgets.QDialog, FORM_CLASS):
             geom = feat.geometry()
             if geom is None or geom.isNull() or geom.isEmpty():
                 continue
-            center = geom.centroid()
+            center = geom.pointOnSurface()
             new_feat = QgsFeature(point_layer.fields())
             new_feat.setGeometry(center)
             new_feat.setAttributes(feat.attributes())
