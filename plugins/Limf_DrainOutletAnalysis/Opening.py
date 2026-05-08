@@ -2,6 +2,7 @@ import numpy as np
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QLabel, QDoubleSpinBox, QComboBox, QPushButton, QLineEdit, QMessageBox,
+    QTabWidget, QWidget, QApplication,
 )
 from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtCore import QVariant
@@ -18,7 +19,7 @@ class DrainDialog(QDialog):
         super().__init__(iface.mainWindow())
         self.iface = iface
         self.canvas = iface.mapCanvas()
-        self.start_point = None   # in map canvas CRS
+        self.start_point = None
         self.map_tool = None
         self.marker_start = None
         self.marker_result = None
@@ -31,7 +32,12 @@ class DrainDialog(QDialog):
     def _build_ui(self):
         main = QVBoxLayout(self)
 
-        # Startpunkt
+        # ── Tabs ──────────────────────────────────────────────────────────
+        self.tabs = QTabWidget()
+
+        # Tab 0: Enkeltpunkt
+        tab_single = QWidget()
+        lay_single = QVBoxLayout(tab_single)
         grp_pt = QGroupBox("Startpunkt")
         frm = QFormLayout(grp_pt)
         self.btn_pick = QPushButton("Klik startpunkt på kortet…")
@@ -47,9 +53,34 @@ class DrainDialog(QDialog):
         self.height_spin.setDecimals(3)
         self.height_spin.setSuffix(" m.o.h.")
         frm.addRow("Starthøjde (drænbund):", self.height_spin)
-        main.addWidget(grp_pt)
+        lay_single.addWidget(grp_pt)
+        lay_single.addStretch()
+        self.tabs.addTab(tab_single, "Enkeltpunkt")
 
-        # Parametre
+        # Tab 1: Punktlag (batch)
+        tab_batch = QWidget()
+        lay_batch = QVBoxLayout(tab_batch)
+        grp_batch = QGroupBox("Punktlag")
+        frm_batch = QFormLayout(grp_batch)
+        self.point_layer_combo = QComboBox()
+        frm_batch.addRow("Punktlag:", self.point_layer_combo)
+        btn_refresh = QPushButton("Opdater lagliste")
+        btn_refresh.clicked.connect(self._populate_point_layers)
+        frm_batch.addRow(btn_refresh)
+        lbl_info = QLabel(
+            "DHM-værdien samples automatisk for hvert punkt.\n"
+            "Starthøjde sættes til DHM − 1 m per punkt."
+        )
+        lbl_info.setWordWrap(True)
+        frm_batch.addRow(lbl_info)
+        lay_batch.addWidget(grp_batch)
+        lay_batch.addStretch()
+        self.tabs.addTab(tab_batch, "Punktlag (batch)")
+
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        main.addWidget(self.tabs)
+
+        # ── Parametre (fælles) ─────────────────────────────────────────────
         grp_par = QGroupBox("Parametre")
         frm2 = QFormLayout(grp_par)
         self.dem_combo = QComboBox()
@@ -61,14 +92,12 @@ class DrainDialog(QDialog):
         self.slope_spin.setDecimals(2)
         self.slope_spin.setSuffix(" ‰")
         frm2.addRow("Fald:", self.slope_spin)
-
         self.radius_spin = QDoubleSpinBox()
         self.radius_spin.setRange(10, 50000)
         self.radius_spin.setValue(2000)
         self.radius_spin.setDecimals(0)
         self.radius_spin.setSuffix(" m")
         frm2.addRow("Max søgeradius:", self.radius_spin)
-
         self.offset_spin = QDoubleSpinBox()
         self.offset_spin.setRange(-500, 500)
         self.offset_spin.setValue(10.0)
@@ -77,7 +106,7 @@ class DrainDialog(QDialog):
         frm2.addRow("Offset over/under terræn:", self.offset_spin)
         main.addWidget(grp_par)
 
-        # Knapper
+        # ── Knapper ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         self.btn_run = QPushButton("Find udløbspunkt")
         self.btn_run.setEnabled(False)
@@ -88,16 +117,35 @@ class DrainDialog(QDialog):
         btn_row.addWidget(btn_close)
         main.addLayout(btn_row)
 
-        # Resultat
+        # ── Resultat ──────────────────────────────────────────────────────
         self.lbl_result = QLabel()
         self.lbl_result.setWordWrap(True)
         main.addWidget(self.lbl_result)
+
+        self._populate_point_layers()
 
     def _fill_dem_layers(self):
         self.dem_combo.clear()
         for layer in QgsProject.instance().mapLayers().values():
             if isinstance(layer, QgsRasterLayer) and layer.isValid():
                 self.dem_combo.addItem(layer.name(), layer.id())
+
+    def _populate_point_layers(self):
+        self.point_layer_combo.clear()
+        for layer in QgsProject.instance().mapLayers().values():
+            if (isinstance(layer, QgsVectorLayer)
+                    and layer.geometryType() == QgsWkbTypes.PointGeometry
+                    and layer.isValid()):
+                self.point_layer_combo.addItem(layer.name(), layer.id())
+        self._on_tab_changed(self.tabs.currentIndex())
+
+    def _on_tab_changed(self, index):
+        if index == 0:
+            self.btn_run.setEnabled(self.start_point is not None)
+            self.btn_run.setText("Find udløbspunkt")
+        else:
+            self.btn_run.setEnabled(self.point_layer_combo.count() > 0)
+            self.btn_run.setText("Kør batch-analyse")
 
     # --------------------------------------------------------- Map picking --
 
@@ -109,20 +157,14 @@ class DrainDialog(QDialog):
 
     def _on_canvas_click(self, point, button):
         self.start_point = point
-
-        # Sample DHM-værdi og sæt felter
         dem = self._get_dem_layer()
         if dem:
             pt_dem = self._to_dem_crs(point, dem)
             val, ok = dem.dataProvider().sample(pt_dem, 1)
-            if ok and val == val:   # not NaN
+            if ok and val == val:
                 self.dhm_edit.setText(f"{val:.3f} m.o.h.")
                 self.height_spin.setValue(val - 1.0)
-
-        # Blå kryds ved startpunkt
-        self._place_marker("start", point, QColor("blue"),
-                           QgsVertexMarker.ICON_CROSS)
-
+        self._place_marker("start", point, QColor("blue"), QgsVertexMarker.ICON_CROSS)
         self.canvas.unsetMapTool(self.map_tool)
         self.btn_run.setEnabled(True)
         self.show()
@@ -131,61 +173,159 @@ class DrainDialog(QDialog):
     # ----------------------------------------------------------- Processing --
 
     def _run(self):
+        if self.tabs.currentIndex() == 0:
+            self._run_single()
+        else:
+            self._run_batch()
+
+    def _run_single(self):
+        dem = self._get_dem_layer()
+        if dem is None:
+            QMessageBox.warning(self, "Fejl", "Vælg et DEM-lag.")
+            return
+        if self.start_point is None:
+            QMessageBox.warning(self, "Fejl", "Klik et startpunkt på kortet.")
+            return
+
+        start_h    = self.height_spin.value()
+        slope      = self.slope_spin.value() / 1000.0
+        max_radius = self.radius_spin.value()
+        offset_m   = self.offset_spin.value() / 100.0
+
+        res = self._analyse_point(self.start_point, start_h, dem,
+                                  slope, max_radius, offset_m, show_errors=True)
+        if res is None:
+            return
+
+        result_pt = res['result_pt']
+        self._place_marker("result", result_pt, QColor("red"), QgsVertexMarker.ICON_BOX)
+        self._add_drain_line(self.start_point, result_pt,
+                             start_h, res['r_drain'],
+                             res['start_status'], res['break_pt'], res['break_kote'])
+
+        self.canvas.setCenter(result_pt)
+        self.canvas.refresh()
+
+        note = res['note']
+        self.lbl_result.setText(
+            f"<b>Udløbspunkt{note}:</b><br>"
+            f"Afstand fra start: <b>{res['r_dist']:.1f} m</b><br>"
+            f"Terrænkote (DEM): {res['r_dem']:.3f} m<br>"
+            f"Drænbundskote ved udløb: {res['r_drain']:.3f} m<br>"
+            f"Frispejl over terræn: {res['r_drain'] - res['r_dem']:.3f} m"
+        )
+
+    def _run_batch(self):
         dem = self._get_dem_layer()
         if dem is None:
             QMessageBox.warning(self, "Fejl", "Vælg et DEM-lag.")
             return
 
-        start_h = self.height_spin.value()
-        slope      = self.slope_spin.value() / 1000.0   # ‰ → m/m
-        max_radius = self.radius_spin.value()
-        offset_m   = self.offset_spin.value() / 100.0   # cm → m
+        lid = self.point_layer_combo.currentData()
+        pt_layer = QgsProject.instance().mapLayer(lid) if lid else None
+        if pt_layer is None:
+            QMessageBox.warning(self, "Fejl", "Vælg et punktlag.")
+            return
 
-        # Startpunkt i DEM's koordinatsystem
-        pt_dem = self._to_dem_crs(self.start_point, dem)
+        slope      = self.slope_spin.value() / 1000.0
+        max_radius = self.radius_spin.value()
+        offset_m   = self.offset_spin.value() / 100.0
+
+        map_crs   = self.canvas.mapSettings().destinationCrs()
+        layer_crs = pt_layer.crs()
+        tr = (QgsCoordinateTransform(layer_crs, map_crs, QgsProject.instance())
+              if map_crs != layer_crs else None)
+
+        features = list(pt_layer.getFeatures())
+        n_total = len(features)
+        n_ok = n_err = 0
+
+        self.btn_run.setEnabled(False)
+        self.lbl_result.setText(f"Behandler 0 / {n_total}…")
+        QApplication.processEvents()
+
+        for i, feat in enumerate(features):
+            geom = feat.geometry()
+            if geom is None or geom.isEmpty():
+                n_err += 1
+                continue
+
+            pt = geom.asPoint()
+            if tr is not None:
+                pt = tr.transform(pt)
+
+            # Sample DHM for automatic start_h
+            pt_dem = self._to_dem_crs(pt, dem)
+            val, ok = dem.dataProvider().sample(pt_dem, 1)
+            if not ok or val != val:  # invalid or NaN
+                n_err += 1
+                continue
+            start_h = val - 1.0
+
+            res = self._analyse_point(pt, start_h, dem,
+                                      slope, max_radius, offset_m, show_errors=False)
+            if res is None:
+                n_err += 1
+                continue
+
+            self._add_drain_line(pt, res['result_pt'],
+                                 start_h, res['r_drain'],
+                                 res['start_status'], res['break_pt'], res['break_kote'])
+            n_ok += 1
+
+            if i % 5 == 0:
+                self.lbl_result.setText(f"Behandler {i + 1} / {n_total}…")
+                QApplication.processEvents()
+
+        self.canvas.refresh()
+        self.btn_run.setEnabled(True)
+        err_str = f" ({n_err} fejlede.)" if n_err else ""
+        self.lbl_result.setText(
+            f"<b>Batch færdig:</b> {n_ok} af {n_total} punkter behandlet.{err_str}"
+        )
+
+    def _analyse_point(self, start_pt_map, start_h, dem,
+                       slope, max_radius, offset_m, show_errors=True):
+        """Beregn drænudløb for ét punkt. Returnerer dict eller None ved fejl."""
+        pt_dem = self._to_dem_crs(start_pt_map, dem)
         sx, sy = pt_dem.x(), pt_dem.y()
 
-        # Læs kun DEM-udsnit inden for søgeradius
         try:
             dem_arr, px_w, px_h, x_min, y_max = self._read_dem_subset(
                 dem, sx, sy, max_radius)
         except Exception as e:
-            QMessageBox.critical(self, "Fejl ved læsning af DEM", str(e))
-            return
+            if show_errors:
+                QMessageBox.critical(self, "Fejl ved læsning af DEM", str(e))
+            return None
 
         rows, cols = dem_arr.shape
         xs = x_min + (np.arange(cols) + 0.5) * px_w
         ys = y_max - (np.arange(rows) + 0.5) * px_h
         X, Y = np.meshgrid(xs, ys)
 
-        # Afstand fra startpunkt til hvert pixel
-        dist = np.sqrt((X - sx) ** 2 + (Y - sy) ** 2)
-
-        # Drænbundskote ved hvert pixel = starthøjde minus fald gange afstand
+        dist       = np.sqrt((X - sx) ** 2 + (Y - sy) ** 2)
         drain_elev = start_h - slope * dist
+        diff       = drain_elev - (dem_arr + offset_m)
 
-        # Vi søger: drain_elev = DEM + offset_m  →  diff = 0
-        diff = drain_elev - (dem_arr + offset_m)
-
-        min_d = max(px_w, px_h)           # ekskluder startpixel
+        min_d = max(px_w, px_h)
         valid = (~np.isnan(dem_arr)) & (dist > min_d)
 
-        offset_cm_str = f"{self.offset_spin.value():.1f} cm"
         note = ""
-        # Find nærmeste pixel hvor drænet rammer det ønskede offset
         above = valid & (diff >= 0)
         if np.any(above):
             idx = np.unravel_index(
                 np.argmin(np.where(above, dist, np.inf)), dist.shape)
         else:
-            # Fallback: pixel med mindst |diff|
             if not np.any(valid):
-                QMessageBox.warning(self, "Ingen resultat",
-                                    "Ingen gyldige DEM-celler fundet.")
-                return
+                if show_errors:
+                    QMessageBox.warning(self, "Ingen resultat",
+                                        "Ingen gyldige DEM-celler fundet.")
+                return None
             idx = np.unravel_index(
                 np.argmin(np.where(valid, np.abs(diff), np.inf)), diff.shape)
-            note = f" (approx. – drænet når ikke {offset_cm_str} over terræn inden for DEM)"
+            offset_cm_str = f"{offset_m * 100:.1f} cm"
+            note = (f" (approx. – drænet når ikke {offset_cm_str}"
+                    f" over terræn inden for DEM)")
 
         r_dist  = float(dist[idx])
         r_dem   = float(dem_arr[idx])
@@ -193,15 +333,10 @@ class DrainDialog(QDialog):
         rx_dem  = float(X[idx])
         ry_dem  = float(Y[idx])
 
-        # Konverter resultatpunkt tilbage til kortets koordinatsystem
         rx_map, ry_map = self._from_dem_crs(QgsPointXY(rx_dem, ry_dem), dem)
         result_pt = QgsPointXY(rx_map, ry_map)
 
-        # Rød boks ved udløbspunkt
-        self._place_marker("result", result_pt, QColor("red"),
-                           QgsVertexMarker.ICON_BOX)
-
-        # Find knækpunkt hvor dybde krydser 50 cm
+        # Find knækpunkt ved 50 cm dybde
         DEPTH_THRESHOLD = 0.50
         n_samples = max(20, int(r_dist / max(px_w, px_h)) + 1)
         ts = np.linspace(0, 1, n_samples)
@@ -211,36 +346,33 @@ class DrainDialog(QDialog):
         row_idx = np.clip(((y_max - sample_y) / px_h - 0.5).astype(int), 0, rows - 1)
         dem_along   = dem_arr[row_idx, col_idx]
         drain_along = start_h - slope * (ts * r_dist)
-        depth_along = dem_along - drain_along   # positiv = dræn under terræn
+        depth_along = dem_along - drain_along
 
         start_status = "Lukket" if depth_along[0] >= DEPTH_THRESHOLD else "Åben"
         break_pt = break_kote = None
         for i in range(len(depth_along) - 1):
             d0, d1 = depth_along[i], depth_along[i + 1]
-            if not (np.isnan(d0) or np.isnan(d1)) and (d0 >= DEPTH_THRESHOLD) != (d1 >= DEPTH_THRESHOLD):
+            if (not (np.isnan(d0) or np.isnan(d1))
+                    and (d0 >= DEPTH_THRESHOLD) != (d1 >= DEPTH_THRESHOLD)):
                 frac   = (DEPTH_THRESHOLD - d0) / (d1 - d0)
                 t_b    = ts[i] + frac * (ts[i + 1] - ts[i])
                 bx_dem = sx + t_b * (rx_dem - sx)
                 by_dem = sy + t_b * (ry_dem - sy)
                 bx_map, by_map = self._from_dem_crs(QgsPointXY(bx_dem, by_dem), dem)
-                break_pt  = QgsPointXY(bx_map, by_map)
+                break_pt   = QgsPointXY(bx_map, by_map)
                 break_kote = start_h - slope * (t_b * r_dist)
                 break
 
-        # Gem linje(r) i memory-lag
-        self._add_drain_line(self.start_point, result_pt, start_h, r_drain,
-                             start_status, break_pt, break_kote)
-
-        self.canvas.setCenter(result_pt)
-        self.canvas.refresh()
-
-        self.lbl_result.setText(
-            f"<b>Udløbspunkt{note}:</b><br>"
-            f"Afstand fra start: <b>{r_dist:.1f} m</b><br>"
-            f"Terrænkote (DEM): {r_dem:.3f} m<br>"
-            f"Drænbundskote ved udløb: {r_drain:.3f} m<br>"
-            f"Frispejl over terræn: {r_drain - r_dem:.3f} m"
-        )
+        return {
+            'result_pt':    result_pt,
+            'r_dist':       r_dist,
+            'r_dem':        r_dem,
+            'r_drain':      r_drain,
+            'start_status': start_status,
+            'break_pt':     break_pt,
+            'break_kote':   break_kote,
+            'note':         note,
+        }
 
     # --------------------------------------------------- Line memory layer --
 
@@ -265,7 +397,6 @@ class DrainDialog(QDialog):
             self._apply_drain_renderer(layer)
             QgsProject.instance().addMapLayer(layer)
         else:
-            # Tilføj 'status'-felt til ældre lag der mangler det
             if layer.fields().indexOf('status') < 0:
                 layer.dataProvider().addAttributes([QgsField('status', QVariant.String)])
                 layer.updateFields()
@@ -325,7 +456,7 @@ class DrainDialog(QDialog):
         return p.x(), p.y()
 
     def _read_dem_subset(self, dem, center_x, center_y, max_radius):
-        """Read only the DEM cells within max_radius of (center_x, center_y)."""
+        """Læs kun DEM-celler inden for max_radius af (center_x, center_y)."""
         from qgis.core import QgsRectangle
         provider    = dem.dataProvider()
         full_extent = dem.extent()
@@ -334,7 +465,6 @@ class DrainDialog(QDialog):
         px_w = full_extent.width()  / w_full
         px_h = full_extent.height() / h_full
 
-        # Clip search box to actual DEM extent
         search = QgsRectangle(
             center_x - max_radius, center_y - max_radius,
             center_x + max_radius, center_y + max_radius,
@@ -348,8 +478,6 @@ class DrainDialog(QDialog):
 
         block = provider.block(1, clip, w, h)
 
-        # QGIS DataType integer values (stable across versions):
-        # 1=Byte, 2=UInt16, 3=Int16, 4=UInt32, 5=Int32, 6=Float32, 7=Float64
         dtype_map = {
             1: np.uint8,  2: np.uint16, 3: np.int16,
             4: np.uint32, 5: np.int32,  6: np.float32, 7: np.float64,
