@@ -23,6 +23,7 @@ class Vaspexcelbegge(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterVectorLayer('points', 'Punkter fra VASP', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterNumber('startstation', 'Startstation', type=QgsProcessingParameterNumber.Integer, defaultValue=1))
         self.addParameter(QgsProcessingParameterEnum('sidevalg', 'Vælg side til terræn', options=['Left','Right'], allowMultiple=False, usesStaticStrings=False, defaultValue=[]))
+        self.addParameter(QgsProcessingParameterNumber('offset_distance', 'Offset afstand (m)', type=QgsProcessingParameterNumber.Double, defaultValue=10.0, minValue=0.0))
         self.addParameter(QgsProcessingParameterFileDestination('Outputexcel', 'outputexcel', fileFilter='Microsoft Excel (*.xlsx);;Open Document Spreadsheet (*.ods)', createByDefault=True, defaultValue=None))
 
     def processAlgorithm(self, parameters, context, model_feedback):
@@ -31,7 +32,8 @@ class Vaspexcelbegge(QgsProcessingAlgorithm):
         feedback = QgsProcessingMultiStepFeedback(8, model_feedback)
         # Determine offset distance based on sidevalg
         side_choice = self.parameterAsEnum(parameters, 'sidevalg', context)
-        offset_distance = 10 if side_choice == 0 else -10
+        dist = self.parameterAsDouble(parameters, 'offset_distance', context)
+        offset_distance = dist if side_choice == 0 else -dist
         start_val = self.parameterAsInt(parameters, 'startstation', context)
 
         results = {}
