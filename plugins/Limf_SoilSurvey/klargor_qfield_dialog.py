@@ -18,28 +18,25 @@ VAL_IKKE = 'Ikke-udtaget'
 VAL_UDTAGET = 'Udtaget'
 
 JORDTYPE_VALG = [
-    'Groft og fint grus',
-    'Grovkornet sand',
     'Uomsat tørv',
+    'Svagt omsat tørv',  
+    'Moderat omsat tørv',
+    'Stærkt omsat tørv',
+    'Fuldstændig omsat tørv',
+    'Finkornet sand',
     'Mellemkornet sand',
     'Mellemkornet sand med indslag af omsat tørv',
-    'Finkornet sand',
-    'Moderat omsat tørv',
-    'Gytjeholdig sand',
-    'Stærkt omsat tørv',
-    'Silt',
+    'Grovkornet sand',
+    'Groft og fint grus',
     'Ler',
+    'Silt',    
     'Kalkgytje',
-    'Fuldstændig omsat tørv',
-    'Svagt omsat tørv',
 ]
 
 # (feltnavn, type, alias, widget-type, widget-config)
 STANDARD_FIELDS = [
     ('status',      QVariant.String,  'Status',          'ValueMap',        {'map': [{VAL_IKKE: VAL_IKKE}, {VAL_UDTAGET: VAL_UDTAGET}]}),
     ('Vol.lgd',     QVariant.Double,  'Volumen lgd (cm)',     'TextEdit',        {}),
-    ('Udtaget',     QVariant.String,  'Udtaget',              'TextEdit',        {}),
-    ('Tørv. Ty.',   QVariant.Double,  'Tørvetykkelse (cm)',   'TextEdit',        {}),
     ('VSP',         QVariant.Double,  'Vandspejl (cm)',       'TextEdit',        {}),
     ('Foto',        QVariant.String,  'Foto af prøve',   'ExternalResource', {'StorageType': '0', 'DocumentViewer': '0', 'FileWidget': '1', 'FileWidgetButton': '1'}),
     ('lag 1',       QVariant.String,  'Lag 1 (cm)',      'TextEdit',        {}),
@@ -50,6 +47,8 @@ STANDARD_FIELDS = [
     ('lag 3 type',  QVariant.String,  'Lag 3 jordtype',  'ValueMap',        {'map': [{v: v} for v in JORDTYPE_VALG]}),
     ('lag 4',       QVariant.String,  'Lag 4 (cm)',      'TextEdit',        {}),
     ('lag 4 type',  QVariant.String,  'Lag 4 jordtype',  'ValueMap',        {'map': [{v: v} for v in JORDTYPE_VALG]}),
+    ('lag 5',       QVariant.String,  'Lag 5 (cm)',      'TextEdit',        {}),
+    ('lag 5 type',  QVariant.String,  'Lag 5 jordtype',  'ValueMap',        {'map': [{v: v} for v in JORDTYPE_VALG]}),
     ('comment',     QVariant.String,  'Kommentar',       'TextEdit',        {}),
 ]
 
@@ -156,6 +155,8 @@ class KlargorQFieldDialog(QtWidgets.QDialog, FORM_CLASS):
 
         layer.startEditing()
 
+        to_delete = []
+
         for row in range(self.tblFelter.rowCount()):
             field_name = self.tblFelter.item(row, 0).text()
             new_alias  = self.tblFelter.item(row, 1).text().strip()
@@ -166,34 +167,37 @@ class KlargorQFieldDialog(QtWidgets.QDialog, FORM_CLASS):
             if idx < 0:
                 continue
 
+            if not included:
+                to_delete.append(idx)
+                continue
+
             # Alias
             layer.setFieldAlias(idx, new_alias)
 
-            # Medtages / skjult
-            if not included:
-                layer.setEditorWidgetSetup(idx, QgsEditorWidgetSetup('Hidden', {}))
-            else:
-                # Gendan standard widget-opsætning for kendte felter
-                std = next((s for s in STANDARD_FIELDS if s[0] == field_name), None)
-                if std:
-                    layer.setEditorWidgetSetup(idx, QgsEditorWidgetSetup(std[3], std[4]))
-                else:
-                    # Eksisterende felt: behold widget, men gør synligt
-                    if layer.editorWidgetSetup(idx).type() == 'Hidden':
-                        layer.setEditorWidgetSetup(idx, QgsEditorWidgetSetup('TextEdit', {}))
+            # Widget-opsætning
+            std = next((s for s in STANDARD_FIELDS if s[0] == field_name), None)
+            if std:
+                layer.setEditorWidgetSetup(idx, QgsEditorWidgetSetup(std[3], std[4]))
+            elif layer.editorWidgetSetup(idx).type() == 'Hidden':
+                layer.setEditorWidgetSetup(idx, QgsEditorWidgetSetup('TextEdit', {}))
 
             # Redigerbar
             form_cfg.setReadOnly(idx, not editable)
 
-        # Default + udfyld status på nye features
-        status_idx = fields.indexOf(STATUS_FIELD)
+        layer.setEditFormConfig(form_cfg)
+
+        # Slet fravalgte felter i omvendt rækkefølge så indekser ikke forskydes
+        for idx in sorted(to_delete, reverse=True):
+            layer.deleteAttribute(idx)
+
+        # Default + udfyld status på nye features (re-fetch efter sletning)
+        status_idx = layer.fields().indexOf(STATUS_FIELD)
         if status_idx >= 0:
             layer.setDefaultValueDefinition(status_idx, QgsDefaultValue(f"'{VAL_IKKE}'"))
             for feat in layer.getFeatures():
                 if not feat[STATUS_FIELD]:
                     layer.changeAttributeValue(feat.id(), status_idx, VAL_IKKE)
 
-        layer.setEditFormConfig(form_cfg)
         layer.commitChanges()
 
         # Farverenderer
