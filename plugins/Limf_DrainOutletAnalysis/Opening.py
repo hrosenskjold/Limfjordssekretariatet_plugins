@@ -4,8 +4,10 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QDoubleSpinBox, QComboBox, QPushButton, QLineEdit, QMessageBox,
 )
 from qgis.PyQt.QtGui import QColor
+from qgis.PyQt.QtCore import QVariant
 from qgis.core import (
     QgsProject, QgsPointXY, QgsRasterLayer, QgsCoordinateTransform,
+    QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsWkbTypes,
 )
 from qgis.gui import QgsMapToolEmitPoint, QgsVertexMarker
 
@@ -197,6 +199,10 @@ class DrainDialog(QDialog):
         # Rød boks ved udløbspunkt
         self._place_marker("result", result_pt, QColor("red"),
                            QgsVertexMarker.ICON_BOX)
+
+        # Gem linje i memory-lag
+        self._add_drain_line(self.start_point, result_pt, start_h, r_drain)
+
         self.canvas.setCenter(result_pt)
         self.canvas.refresh()
 
@@ -208,6 +214,35 @@ class DrainDialog(QDialog):
             f"Drænbundskote ved udløb: {r_drain:.3f} m<br>"
             f"Frispejl over terræn: {r_drain - r_dem:.3f} m"
         )
+
+    # --------------------------------------------------- Line memory layer --
+
+    def _add_drain_line(self, start_pt, end_pt, start_kote, slut_kote):
+        crs_str = self.canvas.mapSettings().destinationCrs().authid()
+
+        # Genbrug eksisterende lag med samme navn, ellers opret nyt
+        layer = next(
+            (lyr for lyr in QgsProject.instance().mapLayers().values()
+             if lyr.name() == "Drænlinjer"
+             and lyr.geometryType() == QgsWkbTypes.LineGeometry),
+            None
+        )
+        if layer is None:
+            layer = QgsVectorLayer(f'LineString?crs={crs_str}', 'Drænlinjer', 'memory')
+            layer.dataProvider().addAttributes([
+                QgsField('start_kote', QVariant.Double),
+                QgsField('slut_kote',  QVariant.Double),
+            ])
+            layer.updateFields()
+            QgsProject.instance().addMapLayer(layer)
+
+        feat = QgsFeature(layer.fields())
+        feat.setGeometry(QgsGeometry.fromPolylineXY([start_pt, end_pt]))
+        feat.setAttribute('start_kote', round(start_kote, 3))
+        feat.setAttribute('slut_kote',  round(slut_kote,  3))
+        layer.dataProvider().addFeatures([feat])
+        layer.updateExtents()
+        layer.triggerRepaint()
 
     # ------------------------------------------------------------ Helpers --
 
