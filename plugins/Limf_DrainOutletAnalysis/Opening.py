@@ -10,6 +10,7 @@ from qgis.core import (
     QgsProject, QgsPointXY, QgsRasterLayer, QgsCoordinateTransform,
     QgsVectorLayer, QgsFeature, QgsGeometry, QgsField, QgsWkbTypes,
     QgsCategorizedSymbolRenderer, QgsRendererCategory, QgsLineSymbol,
+    QgsFeatureRequest, QgsRectangle,
 )
 from qgis.gui import QgsMapToolEmitPoint, QgsVertexMarker
 
@@ -107,6 +108,9 @@ class DrainDialog(QDialog):
         self.offset_spin.setDecimals(1)
         self.offset_spin.setSuffix(" cm")
         frm2.addRow("Offset over/under terræn:", self.offset_spin)
+        self.polygon_combo = QComboBox()
+        self._fill_polygon_layers()
+        frm2.addRow("Søgepolygon (valgfrit):", self.polygon_combo)
         main.addWidget(grp_par)
 
         # ── Knapper ───────────────────────────────────────────────────────
@@ -156,6 +160,15 @@ class DrainDialog(QDialog):
         for field in layer.fields():
             if field.type() in numeric:
                 self.start_kote_field_combo.addItem(field.name(), field.name())
+
+    def _fill_polygon_layers(self):
+        self.polygon_combo.clear()
+        self.polygon_combo.addItem("— Ingen (brug radius) —", None)
+        for layer in QgsProject.instance().mapLayers().values():
+            if (isinstance(layer, QgsVectorLayer)
+                    and layer.geometryType() == QgsWkbTypes.PolygonGeometry
+                    and layer.isValid()):
+                self.polygon_combo.addItem(layer.name(), layer.id())
 
     def _on_tab_changed(self, index):
         if index == 0:
@@ -209,9 +222,11 @@ class DrainDialog(QDialog):
         slope      = self.slope_spin.value() / 1000.0
         max_radius = self.radius_spin.value()
         offset_m   = self.offset_spin.value() / 100.0
+        clip_geom  = self._find_clip_geom(self.start_point, dem)
 
         res = self._analyse_point(self.start_point, start_h, dem,
-                                  slope, max_radius, offset_m, show_errors=True)
+                                  slope, max_radius, offset_m,
+                                  clip_geom=clip_geom, show_errors=True)
         if res is None:
             return
 
@@ -295,8 +310,10 @@ class DrainDialog(QDialog):
                     continue
                 start_h = val - 1.0
 
+            clip_geom = self._find_clip_geom(pt, dem)
             res = self._analyse_point(pt, start_h, dem,
-                                      slope, max_radius, offset_m, show_errors=False)
+                                      slope, max_radius, offset_m,
+                                      clip_geom=clip_geom, show_errors=False)
             if res is None:
                 n_err += 1
                 continue
@@ -318,14 +335,15 @@ class DrainDialog(QDialog):
         )
 
     def _analyse_point(self, start_pt_map, start_h, dem,
-                       slope, max_radius, offset_m, show_errors=True):
+                       slope, max_radius, offset_m,
+                       clip_geom=None, show_errors=True):
         """Beregn drænudløb for ét punkt. Returnerer dict eller None ved fejl."""
         pt_dem = self._to_dem_crs(start_pt_map, dem)
         sx, sy = pt_dem.x(), pt_dem.y()
 
         try:
             dem_arr, px_w, px_h, x_min, y_max = self._read_dem_subset(
-                dem, sx, sy, max_radius)
+                dem, sx, sy, max_radius, clip_rect=clip_geom.boundingBox() if clip_geom else None)
         except Exception as e:
             if show_errors:
                 QMessageBox.critical(self, "Fejl ved læsning af DEM", str(e))
@@ -342,6 +360,24 @@ class DrainDialog(QDialog):
 
         min_d = max(px_w, px_h)
         valid = (~np.isnan(dem_arr)) & (dist > min_d)
+
+        # Begræns søgning til polygon via GDAL-rasterisering
+        if clip_geom is not None:
+            from osgeo import gdal, ogr
+            mem_ds = gdal.GetDriverByName('MEM').Create('', cols, rows, 1, gdal.GDT_Byte)
+            mem_ds.SetGeoTransform([x_min, px_w, 0, y_max, 0, -px_h])
+            mem_ds.GetRasterBand(1).Fill(0)
+            mem_vec = ogr.GetDriverByName('Memory').CreateDataSource('')
+            mem_lyr = mem_vec.CreateLayer('')
+            feat_ogr = ogr.Feature(mem_lyr.GetLayerDefn())
+            feat_ogr.SetGeometry(ogr.CreateGeometryFromWkt(clip_geom.asWkt()))
+            mem_lyr.CreateFeature(feat_ogr)
+            gdal.RasterizeLayer(mem_ds, [1], mem_lyr, burn_values=[1])
+            poly_mask = (np.frombuffer(mem_ds.GetRasterBand(1).ReadRaster(),
+                                       dtype=np.uint8)
+                           .reshape(rows, cols)
+                           .astype(bool))
+            valid = valid & poly_mask
 
         note = ""
         above = valid & (diff >= 0)
@@ -488,9 +524,8 @@ class DrainDialog(QDialog):
         p = tr.transform(point)
         return p.x(), p.y()
 
-    def _read_dem_subset(self, dem, center_x, center_y, max_radius):
-        """Læs kun DEM-celler inden for max_radius af (center_x, center_y)."""
-        from qgis.core import QgsRectangle
+    def _read_dem_subset(self, dem, center_x, center_y, max_radius, clip_rect=None):
+        """Læs DEM-udsnit. clip_rect (QgsRectangle i DEM-CRS) tilsidesætter radius."""
         provider    = dem.dataProvider()
         full_extent = dem.extent()
         w_full      = dem.width()
@@ -498,10 +533,13 @@ class DrainDialog(QDialog):
         px_w = full_extent.width()  / w_full
         px_h = full_extent.height() / h_full
 
-        search = QgsRectangle(
-            center_x - max_radius, center_y - max_radius,
-            center_x + max_radius, center_y + max_radius,
-        )
+        if clip_rect is not None:
+            search = clip_rect
+        else:
+            search = QgsRectangle(
+                center_x - max_radius, center_y - max_radius,
+                center_x + max_radius, center_y + max_radius,
+            )
         clip = full_extent.intersect(search)
         if clip.isEmpty():
             raise ValueError("Startpunktet ligger uden for DEM-laget.")
@@ -525,6 +563,39 @@ class DrainDialog(QDialog):
             arr[arr == provider.sourceNoDataValue(1)] = np.nan
 
         return arr, px_w, px_h, clip.xMinimum(), clip.yMaximum()
+
+    def _find_clip_geom(self, pt_map, dem):
+        """Find polygon i det valgte polygon-lag der indeholder pt_map.
+        Returnerer geometrien transformeret til DEM-CRS, eller None."""
+        lid = self.polygon_combo.currentData()
+        if lid is None:
+            return None
+        poly_layer = QgsProject.instance().mapLayer(lid)
+        if poly_layer is None:
+            return None
+
+        map_crs  = self.canvas.mapSettings().destinationCrs()
+        poly_crs = poly_layer.crs()
+        dem_crs  = dem.crs()
+
+        # Punkt i polygon-lagets CRS
+        if map_crs != poly_crs:
+            tr = QgsCoordinateTransform(map_crs, poly_crs, QgsProject.instance())
+            pt_in_poly = tr.transform(pt_map)
+        else:
+            pt_in_poly = pt_map
+
+        pt_geom = QgsGeometry.fromPointXY(pt_in_poly)
+        for feat in poly_layer.getFeatures(
+                QgsFeatureRequest().setFilterRect(pt_geom.boundingBox())):
+            geom = feat.geometry()
+            if geom and geom.contains(pt_geom):
+                # Transformer til DEM-CRS inden rasterisering
+                if poly_crs != dem_crs:
+                    geom.transform(
+                        QgsCoordinateTransform(poly_crs, dem_crs, QgsProject.instance()))
+                return geom
+        return None
 
     def _place_marker(self, name, point, color, icon):
         attr = f"marker_{name}"
