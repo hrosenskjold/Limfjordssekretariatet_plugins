@@ -12,6 +12,8 @@ from qgis.core import QgsProcessingMultiStepFeedback
 from qgis.core import QgsProcessingParameterVectorLayer
 from qgis.core import QgsProcessingParameterRasterLayer
 from qgis.core import QgsProcessingParameterRasterDestination
+from qgis.core import QgsProcessingUtils
+from qgis.core import QgsVectorFileWriter, QgsCoordinateTransformContext
 from osgeo import gdal
 import processing
 
@@ -24,8 +26,6 @@ class InterpolerTerrn(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterRasterDestination('Merge', 'Fyldt højdemodel', createByDefault=True, defaultValue=None))
 
     def processAlgorithm(self, parameters, context, model_feedback):
-        # Use a multi-step feedback, so that individual child algorithm progress reports are adjusted for the
-        # overall progress through the model
         feedback = QgsProcessingMultiStepFeedback(5, model_feedback)
         results = {}
         outputs = {}
@@ -78,41 +78,43 @@ class InterpolerTerrn(QgsProcessingAlgorithm):
         if feedback.isCanceled():
             return {}
 
-        # Clip raster by mask layer
-        alg_params = {
-            'ALPHA_BAND': False,
-            'CROP_TO_CUTLINE': True,
-            'DATA_TYPE': 0,  # Use Input Layer Data Type
-            'EXTRA': '',
-            'INPUT': outputs['GridIdwWithNearestNeighborSearching']['OUTPUT'],
-            'KEEP_RESOLUTION': False,
-            'MASK': parameters['omrde'],
-            'MULTITHREADING': False,
-            'NODATA': None,
-            'OPTIONS': None,
-            'SET_RESOLUTION': False,
-            'SOURCE_CRS': None,
-            'TARGET_CRS': None,
-            'TARGET_EXTENT': None,
-            'X_RESOLUTION': None,
-            'Y_RESOLUTION': None,
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
-        }
-        outputs['ClipRasterByMaskLayer'] = processing.run('gdal:cliprasterbymasklayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        # Clip raster til polygon via Python GDAL (håndterer memory/scratch-lag)
+        idw_path     = outputs['GridIdwWithNearestNeighborSearching']['OUTPUT']
+        cutline_path = self._layer_to_path(
+            self.parameterAsVectorLayer(parameters, 'omrde', context))
+        clipped_path = QgsProcessingUtils.generateTempFilename('clipped.tif')
+        gdal.Warp(
+            clipped_path, idw_path,
+            cutlineDSName=cutline_path,
+            cropToCutline=True,
+            dstNodata=-9999.0,
+            outputType=gdal.GDT_Float32,
+            format='GTiff',
+        )
 
         feedback.setCurrentStep(4)
         if feedback.isCanceled():
             return {}
 
         # Merge via Python GDAL (undgår gdal_merge.bat Windows-encodingfejl)
-        out_path = self.parameterAsOutputLayer(parameters, 'Merge', context)
-        dhm_path = self.parameterAsRasterLayer(parameters, 'dhm', context).source()
-        clipped_path = outputs['ClipRasterByMaskLayer']['OUTPUT']
-
+        out_path  = self.parameterAsOutputLayer(parameters, 'Merge', context)
+        dhm_path  = self.parameterAsRasterLayer(parameters, 'dhm', context).source()
         gdal.Warp(out_path, [dhm_path, clipped_path], format='GTiff', outputType=gdal.GDT_Float32)
 
         results['Merge'] = out_path
         return results
+
+    def _layer_to_path(self, layer):
+        """Returnerer filsti til vektorlag – eksporterer memory/scratch-lag til temp-GPKG."""
+        src = layer.source()
+        if src.startswith('memory:') or '?geometrytype' in src:
+            temp_path = QgsProcessingUtils.generateTempFilename('clip_mask.gpkg')
+            opts = QgsVectorFileWriter.SaveVectorOptions()
+            opts.driverName = 'GPKG'
+            QgsVectorFileWriter.writeAsVectorFormatV3(
+                layer, temp_path, QgsCoordinateTransformContext(), opts)
+            return temp_path
+        return src.split('|')[0]
 
     def name(self):
         return 'Interpoler terræn'
