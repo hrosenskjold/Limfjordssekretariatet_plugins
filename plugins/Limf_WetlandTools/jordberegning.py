@@ -156,30 +156,27 @@ class DHMVolumen(QgsProcessingAlgorithm):
     # ----------------------------------------------------------------- helpers
 
     def _rasterize_mask(self, mask_layer, gt, proj, xsize, ysize):
-        """Returnerer bool-numpy-array (True = inden for polygon), eller None ved fejl."""
+        """Returnerer bool-numpy-array (True = inden for polygon), eller None ved fejl.
+        Virker for både fil-baserede og memory/scratch-lag."""
         try:
-            source = mask_layer.source().split('|')[0]
-            mask_ds = ogr.Open(source)
-            if mask_ds is None:
-                return None
-            mask_lyr = mask_ds.GetLayer()
-
             raster_srs = osr.SpatialReference()
             raster_srs.ImportFromWkt(proj)
             raster_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
 
-            vec_srs = mask_lyr.GetSpatialRef()
-            need_transform = (vec_srs is not None
-                              and not raster_srs.IsSame(vec_srs))
-            if need_transform:
-                ct = osr.CoordinateTransformation(vec_srs, raster_srs)
+            # Hent CRS fra QGIS-laget (virker for alle lagtyper inkl. memory)
+            vec_srs = osr.SpatialReference()
+            vec_srs.ImportFromWkt(mask_layer.crs().toWkt())
+            vec_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+            need_transform = not raster_srs.IsSame(vec_srs)
+            ct = osr.CoordinateTransformation(vec_srs, raster_srs) if need_transform else None
 
             mem_vec = ogr.GetDriverByName('Memory').CreateDataSource('')
             mem_lyr = mem_vec.CreateLayer('mask', srs=raster_srs,
                                           geom_type=ogr.wkbMultiPolygon)
-            for feat in mask_lyr:
-                geom = feat.GetGeometryRef().Clone()
-                if need_transform:
+            # Iterer via QGIS getFeatures() – virker for fil og memory-lag
+            for feat in mask_layer.getFeatures():
+                geom = ogr.CreateGeometryFromWkt(feat.geometry().asWkt())
+                if ct is not None:
                     geom.Transform(ct)
                 nf = ogr.Feature(mem_lyr.GetLayerDefn())
                 nf.SetGeometry(geom)
